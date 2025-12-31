@@ -54,13 +54,21 @@ function App() {
   const openModal = (bag = null) => {
     if (bag) {
       setSelectedBag(bag)
-      setFormData({ ...bag, images: bag.images || [] })
+      setFormData({
+        ...bag,
+        images: bag.images || [],
+        purchase_price: bag.purchase_price !== undefined ? Number(bag.purchase_price).toFixed(2) : '',
+        target_resale_price: bag.target_resale_price !== undefined ? Number(bag.target_resale_price).toFixed(2) : '',
+        actual_resale_price: bag.actual_resale_price !== undefined ? Number(bag.actual_resale_price).toFixed(2) : '',
+        fees: bag.fees !== undefined ? Number(bag.fees).toFixed(2) : '',
+        material_costs: bag.material_costs !== undefined ? Number(bag.material_costs).toFixed(2) : ''
+      })
     } else {
       setSelectedBag(null)
       setFormData({
-        name: '', brand: '', purchase_price: 0, target_resale_price: 0,
-        actual_resale_price: 0, status: 'to_be_cleaned', fees: 0,
-        material_costs: 0, notes: '', purchase_source: '', is_donation: 0, images: []
+        name: '', brand: '', purchase_price: '', target_resale_price: '',
+        actual_resale_price: '', status: 'to_be_cleaned', fees: '',
+        material_costs: '', notes: '', purchase_source: '', is_donation: 0, images: []
       })
     }
     setShowModal(true)
@@ -231,7 +239,24 @@ function App() {
           selectedBag={selectedBag}
           formData={formData}
           setFormData={setFormData}
-          handleSubmit={(e) => { e.preventDefault(); handleSubmit(formData, selectedBag, closeModal); }}
+          handleSubmit={(e) => {
+            e.preventDefault();
+            const cleanNumber = (val) => {
+              if (typeof val === 'string') {
+                val = val.replace(',', '.');
+              }
+              return parseFloat(val) || 0;
+            };
+            const cleanedData = {
+              ...formData,
+              purchase_price: cleanNumber(formData.purchase_price),
+              target_resale_price: cleanNumber(formData.target_resale_price),
+              actual_resale_price: cleanNumber(formData.actual_resale_price),
+              fees: cleanNumber(formData.fees),
+              material_costs: cleanNumber(formData.material_costs),
+            }
+            handleSubmit(cleanedData, selectedBag, closeModal);
+          }}
           handleDelete={(id) => handleDelete(id, closeModal)}
           onImageAdd={(file, type) => handleImageAdd(file, type, selectedBag, setFormData)}
           onImageDelete={(img) => handleImageDelete(img, setFormData)}

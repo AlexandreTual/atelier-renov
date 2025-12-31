@@ -243,21 +243,43 @@ function BagModal({
                         <div className="form-group">
                             <label>Achat (€)</label>
                             <input
-                                type="number"
-                                step="0.01"
+                                type="text"
+                                inputMode="decimal"
                                 value={formData.is_donation ? 0 : formData.purchase_price}
-                                onChange={e => setFormData({ ...formData, purchase_price: parseFloat(e.target.value) || 0 })}
+                                onChange={e => setFormData({ ...formData, purchase_price: e.target.value })}
+                                onBlur={e => {
+                                    const val = parseFloat(e.target.value.replace(',', '.'));
+                                    if (!isNaN(val)) setFormData({ ...formData, purchase_price: val.toFixed(2) });
+                                }}
                                 disabled={!!formData.is_donation}
                                 style={formData.is_donation ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
                             />
                         </div>
                         <div className="form-group">
                             <label>Vente Est. (€)</label>
-                            <input type="number" step="0.01" value={formData.target_resale_price} onChange={e => setFormData({ ...formData, target_resale_price: parseFloat(e.target.value) || 0 })} />
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={formData.target_resale_price}
+                                onChange={e => setFormData({ ...formData, target_resale_price: e.target.value })}
+                                onBlur={e => {
+                                    const val = parseFloat(e.target.value.replace(',', '.'));
+                                    if (!isNaN(val)) setFormData({ ...formData, target_resale_price: val.toFixed(2) });
+                                }}
+                            />
                         </div>
                         <div className="form-group">
                             <label>Coût Matériel (€)</label>
-                            <input type="number" step="0.01" value={formData.material_costs} onChange={e => setFormData({ ...formData, material_costs: parseFloat(e.target.value) || 0 })} />
+                            <input
+                                type="text"
+                                inputMode="decimal"
+                                value={formData.material_costs}
+                                onChange={e => setFormData({ ...formData, material_costs: e.target.value })}
+                                onBlur={e => {
+                                    const val = parseFloat(e.target.value.replace(',', '.'));
+                                    if (!isNaN(val)) setFormData({ ...formData, material_costs: val.toFixed(2) });
+                                }}
+                            />
                         </div>
                     </div>
 
@@ -265,11 +287,29 @@ function BagModal({
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', background: '#eafaf1', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
                             <div className="form-group">
                                 <label>Vente Réelle (€)</label>
-                                <input type="number" step="0.01" value={formData.actual_resale_price} onChange={e => setFormData({ ...formData, actual_resale_price: parseFloat(e.target.value) || 0 })} />
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={formData.actual_resale_price}
+                                    onChange={e => setFormData({ ...formData, actual_resale_price: e.target.value })}
+                                    onBlur={e => {
+                                        const val = parseFloat(e.target.value.replace(',', '.'));
+                                        if (!isNaN(val)) setFormData({ ...formData, actual_resale_price: val.toFixed(2) });
+                                    }}
+                                />
                             </div>
                             <div className="form-group">
                                 <label>Frais Plateforme (€)</label>
-                                <input type="number" step="0.01" value={formData.fees} onChange={e => setFormData({ ...formData, fees: parseFloat(e.target.value) || 0 })} />
+                                <input
+                                    type="text"
+                                    inputMode="decimal"
+                                    value={formData.fees}
+                                    onChange={e => setFormData({ ...formData, fees: e.target.value })}
+                                    onBlur={e => {
+                                        const val = parseFloat(e.target.value.replace(',', '.'));
+                                        if (!isNaN(val)) setFormData({ ...formData, fees: val.toFixed(2) });
+                                    }}
+                                />
                             </div>
                         </div>
                     )}

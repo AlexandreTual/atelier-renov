@@ -59,18 +59,18 @@ function BagCard({ bag, onClick }) {
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: '0.75rem', color: '#aaa' }}>{bag.status === 'sold' ? 'Profit Réel' : 'Profit Est.'}</div>
             <div style={{ fontWeight: '700', color: profit >= 0 ? 'var(--accent-green)' : '#e74c3c' }}>
-              {profit >= 0 ? '+' : ''}{profit.toFixed(0)} €
+              {profit >= 0 ? '+' : ''}{profit.toFixed(2)} €
             </div>
           </div>
         </div>
         <div className="bag-prices">
           <div className="price-item">
             <span className="price-label">Achat</span>
-            <span className="price-value">{bag.purchase_price} €</span>
+            <span className="price-value">{Number(bag.purchase_price || 0).toFixed(2)} €</span>
           </div>
           <div className="price-item">
             <span className="price-label">{bag.status === 'sold' ? 'Vendu' : 'Objectif'}</span>
-            <span className="price-value">{bag.status === 'sold' ? bag.actual_resale_price : bag.target_resale_price} €</span>
+            <span className="price-value">{Number(bag.status === 'sold' ? bag.actual_resale_price : bag.target_resale_price || 0).toFixed(2)} €</span>
           </div>
         </div>
       </div>
