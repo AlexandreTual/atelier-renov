@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "https://purring-kristin-levyathan-40ad1ffe.koyeb.app/api/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
