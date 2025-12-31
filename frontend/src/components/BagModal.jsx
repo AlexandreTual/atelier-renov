@@ -26,6 +26,8 @@ function BagModal({
     onImageDelete,
     brands = [],
     onAddBrand,
+    itemTypes = [],
+    onAddItemType,
     authenticatedFetch
 }) {
     const [uploading, setUploading] = useState(false)
@@ -56,7 +58,7 @@ function BagModal({
         <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                    <h2>{selectedBag ? 'Modifier le sac' : 'Nouveau sac'}</h2>
+                    <h2>{selectedBag ? 'Modifier' : 'Nouveau projet'}</h2>
                     <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={24} /></button>
                 </div>
 
@@ -98,16 +100,36 @@ function BagModal({
 
                 <form onSubmit={async (e) => {
                     e.preventDefault();
+
+                    // Handle new Brand
                     const brandExists = brands.some(b => b.name.toLowerCase() === formData.brand.toLowerCase());
                     if (formData.brand && !brandExists) {
                         await onAddBrand(formData.brand);
                     }
+
+                    // Handle new Item Type
+                    const typeExists = itemTypes.some(t => t.name.toLowerCase() === (formData.item_type || '').toLowerCase());
+                    if (formData.item_type && !typeExists) {
+                        await onAddItemType(formData.item_type);
+                    }
+
                     handleSubmit(e);
                 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
                         <div className="form-group">
-                            <label>Modèle</label>
-                            <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="ex: Kelly 32" required />
+                            <label>Type</label>
+                            <input
+                                type="text"
+                                list="types-list"
+                                value={formData.item_type || ''}
+                                onChange={e => setFormData({ ...formData, item_type: e.target.value })}
+                                placeholder="ex: Sac"
+                            />
+                            <datalist id="types-list">
+                                {itemTypes.map(t => (
+                                    <option key={t.id} value={t.name} />
+                                ))}
+                            </datalist>
                         </div>
                         <div className="form-group">
                             <label>Marque</label>
@@ -123,6 +145,10 @@ function BagModal({
                                     <option key={brand.id} value={brand.name} />
                                 ))}
                             </datalist>
+                        </div>
+                        <div className="form-group">
+                            <label>Modèle</label>
+                            <input type="text" value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} placeholder="ex: Kelly 32" required />
                         </div>
                     </div>
 

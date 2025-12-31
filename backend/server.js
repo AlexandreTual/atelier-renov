@@ -223,6 +223,7 @@ async function setupDb() {
                 notes TEXT,
                 purchase_source TEXT,
                 is_donation ${typeBoolean},
+                item_type TEXT DEFAULT 'Sac',
                 created_at ${typeTimestamp}
             )
         `);
@@ -283,6 +284,16 @@ async function setupDb() {
         `);
 
         await query(`
+            CREATE TABLE IF NOT EXISTS item_types (
+                id ${typeId},
+                name TEXT NOT NULL UNIQUE,
+                created_at ${typeTimestamp}
+            )
+        `);
+
+
+
+        await query(`
             CREATE TABLE IF NOT EXISTS bag_logs (
                 id ${typeId},
                 bag_id INTEGER,
@@ -310,6 +321,17 @@ async function setupDb() {
             for (const brand of defaultBrands) {
                 try {
                     await query('INSERT INTO brands (name) VALUES (?)', [brand]);
+                } catch (e) { /* ignore */ }
+            }
+        }
+
+        const typesCount = await query('SELECT COUNT(*) as count FROM item_types');
+        const tCount = IS_LOCAL ? typesCount.rows[0].count : typesCount.rows[0].count;
+        if (parseInt(tCount) === 0) {
+            const defaultTypes = ['Sac', 'Chaussures', 'Petite Maroquinerie', 'Vêtements', 'Accessoires', 'Autre'];
+            for (const t of defaultTypes) {
+                try {
+                    await query('INSERT INTO item_types (name) VALUES (?)', [t]);
                 } catch (e) { /* ignore */ }
             }
         }
@@ -406,10 +428,10 @@ app.get('/api/bags', auth, async (req, res) => {
 
 app.post('/api/bags', auth, validateBag, async (req, res) => {
     try {
-        const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation } = req.body;
+        const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type } = req.body;
         const id = await insertAndGetId(
-            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false)]
+            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac']
         );
         res.json({ id });
     } catch (err) {
@@ -424,7 +446,7 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
         const {
             name, brand, purchase_price, target_resale_price, actual_resale_price,
             status, purchase_date, sale_date, fees, material_costs, time_spent, notes,
-            purchase_source, is_donation
+            purchase_source, is_donation, item_type
         } = req.body;
 
         await query(
@@ -432,9 +454,9 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
                 name = ?, brand = ?, purchase_price = ?, target_resale_price = ?, 
                 actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?, 
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
-                purchase_source = ?, is_donation = ?
+                purchase_source = ?, is_donation = ?, item_type = ?
             WHERE id = ?`,
-            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), id]
+            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -797,6 +819,28 @@ app.get('/api/brands', auth, async (req, res) => {
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch brands' });
+    }
+});
+
+
+
+app.get('/api/item-types', auth, async (req, res) => {
+    try {
+        const result = await query('SELECT * FROM item_types ORDER BY name ASC');
+        res.json(result.rows);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch item types' });
+    }
+});
+
+app.post('/api/item-types', auth, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name required' });
+        const id = await insertAndGetId('INSERT INTO item_types (name) VALUES (?)', [name]);
+        res.json({ id });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to add item type' });
     }
 });
 

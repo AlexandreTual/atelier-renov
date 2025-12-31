@@ -19,19 +19,20 @@ import { useProjectData } from './hooks/useProjectData'
 import { useBagActions } from './hooks/useBagActions'
 import { useDashboardListActions } from './hooks/useDashboardListActions'
 import { useBrandActions } from './hooks/useBrandActions'
+import { useItemTypeActions } from './hooks/useItemTypeActions'
 
 function App() {
   const { token, authenticatedFetch, login, logout } = useAuth()
   const {
-    bags, dashboardLists, setDashboardLists, consumables, expenses, brands,
-    fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands, fetchAll
+    bags, dashboardLists, setDashboardLists, consumables, expenses, brands, itemTypes,
+    fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands, fetchItemTypes, fetchAll
   } = useProjectData(authenticatedFetch)
 
   // UI state
   const [showModal, setShowModal] = useState(false)
   const [selectedBag, setSelectedBag] = useState(null)
   const [formData, setFormData] = useState({
-    name: '', brand: '', purchase_price: 0, target_resale_price: 0,
+    name: '', brand: '', item_type: 'Sac', purchase_price: 0, target_resale_price: 0,
     actual_resale_price: 0, status: 'to_be_cleaned', fees: 0,
     material_costs: 0, notes: '', purchase_source: '', is_donation: 0, images: []
   })
@@ -44,6 +45,7 @@ function App() {
   const { handleImageAdd, handleImageDelete, handleSubmit, handleDelete } = useBagActions(authenticatedFetch, fetchBags)
   const { handleSaveList, handleDeleteList, handleReorderList } = useDashboardListActions(authenticatedFetch, fetchDashboardLists)
   const { handleAddBrand } = useBrandActions(authenticatedFetch, fetchBrands)
+  const { handleAddItemType } = useItemTypeActions(authenticatedFetch, fetchItemTypes)
 
   useEffect(() => {
     if (token) {
@@ -56,6 +58,7 @@ function App() {
       setSelectedBag(bag)
       setFormData({
         ...bag,
+        item_type: bag.item_type || 'Sac',
         images: bag.images || [],
         purchase_price: bag.purchase_price !== undefined ? Number(bag.purchase_price).toFixed(2) : '',
         target_resale_price: bag.target_resale_price !== undefined ? Number(bag.target_resale_price).toFixed(2) : '',
@@ -66,7 +69,7 @@ function App() {
     } else {
       setSelectedBag(null)
       setFormData({
-        name: '', brand: '', purchase_price: '', target_resale_price: '',
+        name: '', brand: '', item_type: 'Sac', purchase_price: '', target_resale_price: '',
         actual_resale_price: '', status: 'to_be_cleaned', fees: '',
         material_costs: '', notes: '', purchase_source: '', is_donation: 0, images: []
       })
@@ -262,6 +265,8 @@ function App() {
           onImageDelete={(img) => handleImageDelete(img, setFormData)}
           brands={brands}
           onAddBrand={handleAddBrand}
+          itemTypes={itemTypes}
+          onAddItemType={handleAddItemType}
           authenticatedFetch={authenticatedFetch}
         />
 

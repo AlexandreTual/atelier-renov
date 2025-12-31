@@ -6,6 +6,7 @@ export const useProjectData = (authenticatedFetch) => {
     const [consumables, setConsumables] = useState([]);
     const [expenses, setExpenses] = useState([]);
     const [brands, setBrands] = useState([]);
+    const [itemTypes, setItemTypes] = useState([]);
     const [isLoading, setIsLoading] = useState(false);
 
     const fetchBags = useCallback(async () => {
@@ -58,6 +59,16 @@ export const useProjectData = (authenticatedFetch) => {
         }
     }, [authenticatedFetch]);
 
+    const fetchItemTypes = useCallback(async () => {
+        try {
+            const resp = await authenticatedFetch(`/api/item-types`);
+            const data = await resp.json();
+            setItemTypes(data);
+        } catch (err) {
+            console.error('Failed to fetch item types', err);
+        }
+    }, [authenticatedFetch]);
+
     const fetchAll = useCallback(async () => {
         setIsLoading(true);
         await Promise.all([
@@ -65,10 +76,11 @@ export const useProjectData = (authenticatedFetch) => {
             fetchDashboardLists(),
             fetchConsumables(),
             fetchExpenses(),
-            fetchBrands()
+            fetchBrands(),
+            fetchItemTypes()
         ]);
         setIsLoading(false);
-    }, [fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands]);
+    }, [fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands, fetchItemTypes]);
 
     return {
         bags, setBags,
@@ -76,12 +88,14 @@ export const useProjectData = (authenticatedFetch) => {
         consumables, setConsumables,
         expenses, setExpenses,
         brands, setBrands,
+        itemTypes, setItemTypes,
         isLoading,
         fetchBags,
         fetchDashboardLists,
         fetchConsumables,
         fetchExpenses,
         fetchBrands,
+        fetchItemTypes,
         fetchAll
     };
 };
