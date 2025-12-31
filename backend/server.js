@@ -9,11 +9,8 @@ const bcrypt = require('bcryptjs');
 const stream = require('stream');
 
 // --- Dual Mode Config ---
-// Si USE_LOCAL_MODE est 'true' dans le .env, on utilise SQLite et le FS local.
-// Sinon, on utilise PostgreSQL et Cloudinary.
 const IS_LOCAL = process.env.USE_LOCAL_MODE === 'true';
 
-// Imports conditionnels
 let sqlite3, open, Pool, cloudinary;
 
 if (IS_LOCAL) {
@@ -41,13 +38,37 @@ if (!IS_LOCAL) {
 }
 
 // --- Middleware ---
+
+// Simplify allowedOrigins calculation
+const getAllowedOrigins = () => [
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_URL?.replace(/\/$/, ''), // Remove trailing slash
+    'https://atelier-renov.vercel.app',
+    'http://localhost:5173'
+].filter(Boolean);
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || '*',
-    credentials: true
+    origin: function (origin, callback) {
+        if (!origin) return callback(null, true);
+        const allowed = getAllowedOrigins();
+        const isAllowed = allowed.some(o => origin.startsWith(o));
+
+        if (process.env.FRONTEND_URL === '*' || isAllowed) {
+            callback(null, true);
+        } else {
+            console.warn(`Blocked by CORS: ${origin}. Allowed: ${allowed.join(', ')}`);
+            callback(null, true); // TEMPORARY: Allow all
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
 }));
+
 app.use(express.json());
+
 app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
+    console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin}`);
     next();
 });
 
@@ -73,22 +94,11 @@ let db;
 // Wrapper pour uniformiser les requêtes
 const query = async (sql, params = []) => {
     if (IS_LOCAL) {
-        // Mode SQLite
-        // SQLite utilise '?' pour les paramètres.
-        // Si le SQL contient $1, $2, etc (syntaxe PG), on les remplace par '?' pour SQLite?
-        // NON, c'est trop risqué.
-        // STRATÉGIE : Le code appelant devra utiliser la syntaxe '?' par défaut,
-        // et le wrapper PG convertira '?' en '$1', '$2'.
-
         let localSql = sql;
-        // Si la requête est un INSERT, on veut l'ID.
-        // db.run renvoie un objet avec lastID.
         if (localSql.trim().toUpperCase().startsWith('INSERT') ||
             localSql.trim().toUpperCase().startsWith('UPDATE') ||
             localSql.trim().toUpperCase().startsWith('DELETE')) {
             const result = await db.run(localSql, params);
-            // On simule le format de retour de PG pour les SELECT, mais pour les mutations
-            // on renvoie un objet custom qu'on normalisera.
             return {
                 rows: [],
                 rowCount: result.changes,
@@ -99,42 +109,25 @@ const query = async (sql, params = []) => {
             return { rows, rowCount: rows.length };
         }
     } else {
-        // Mode PostgreSQL
-        // Convertir '?' en '$1', '$2', ...
         let paramIndex = 1;
         const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
-
-        // Exécuter
         const result = await db.query(pgSql, params);
-
-        // Pour les INSERT, PG ne renvoie pas lastID automatiquement sauf si on met RETURNING id.
-        // Notre code appelant devra inclure "RETURNING id" uniquement si PG ?
-        // Ou on l'ajoute automatiquement ? C'est complique.
-        // On va standardiser le code appelant pour qu'il soit agnostique d'ID.
-        // On utilisera une fonction helper 'insertAndGetId'.
         return result;
     }
 };
 
-// Helper pour les INSERTS qui doivent retourner un ID
 const insertAndGetId = async (sql, params) => {
     if (IS_LOCAL) {
-        // SQLite
-        // Enlever "RETURNING id" si présent (syntaxe PG)
         const cleanSql = sql.replace(/RETURNING\s+id/i, '');
         const result = await db.run(cleanSql, params);
         return result.lastID;
     } else {
-        // PostgreSQL
-        // S'assurer que le SQL a "RETURNING id"
         let pgSql = sql;
         if (!/RETURNING\s+id/i.test(pgSql)) {
             pgSql += ' RETURNING id';
         }
-        // Convertir '?' en '$n'
         let paramIndex = 1;
         pgSql = pgSql.replace(/\?/g, () => `$${paramIndex++}`);
-
         const result = await db.query(pgSql, params);
         return result.rows[0]?.id;
     }
@@ -144,12 +137,8 @@ const insertAndGetId = async (sql, params) => {
 
 const saveImage = async (buffer) => {
     if (IS_LOCAL) {
-        // Save to disk
         const filename = Date.now() + '.webp';
         const outputPath = path.join(__dirname, 'uploads', filename);
-        const sharp = require('sharp'); // On suppose sharp dispo, sinon on écrit le buffer direct
-
-        // Si sharp est installé, on l'utilise pour optimiser, sinon fs.writeFile
         try {
             const sharp = require('sharp');
             await sharp(buffer)
@@ -157,13 +146,10 @@ const saveImage = async (buffer) => {
                 .webp({ quality: 80 })
                 .toFile(outputPath);
         } catch (e) {
-            // Fallback si sharp pas là (même si on l'a dans package.json)
             fs.writeFileSync(outputPath, buffer);
         }
-
         return { url: `/uploads/${filename}`, public_id: null };
     } else {
-        // Save to Cloudinary
         return new Promise((resolve, reject) => {
             const uploadStream = cloudinary.uploader.upload_stream(
                 { resource_type: 'image', folder: 'atelier-renov' },
@@ -181,9 +167,7 @@ const saveImage = async (buffer) => {
 
 const deleteImage = async (imageObj) => {
     if (!imageObj) return;
-
     if (IS_LOCAL) {
-        // Local delete
         if (!imageObj.url) return;
         const filename = imageObj.url.split('/').pop();
         const filePath = path.join(__dirname, 'uploads', filename);
@@ -191,7 +175,6 @@ const deleteImage = async (imageObj) => {
             fs.unlinkSync(filePath);
         }
     } else {
-        // Cloudinary delete
         if (imageObj.public_id) {
             try {
                 await cloudinary.uploader.destroy(imageObj.public_id);
@@ -219,17 +202,10 @@ async function setupDb() {
             console.log('Connected to PostgreSQL');
         }
 
-        // Schema Creation - Syntax Compatibility
-        // We use slightly generic SQL where possible.
-        // For auto-increment id:
-        // SQLite: INTEGER PRIMARY KEY AUTOINCREMENT
-        // PG: SERIAL PRIMARY KEY
-
         const typeId = IS_LOCAL ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'SERIAL PRIMARY KEY';
         const typeBoolean = IS_LOCAL ? 'INTEGER DEFAULT 0' : 'BOOLEAN DEFAULT FALSE';
         const typeTimestamp = IS_LOCAL ? 'DATETIME DEFAULT CURRENT_TIMESTAMP' : 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP';
 
-        // Bags
         await query(`
             CREATE TABLE IF NOT EXISTS bags (
                 id ${typeId},
@@ -251,7 +227,6 @@ async function setupDb() {
             )
         `);
 
-        // Images
         await query(`
             CREATE TABLE IF NOT EXISTS images (
                 id ${typeId},
@@ -263,12 +238,7 @@ async function setupDb() {
                 ${IS_LOCAL ? ', FOREIGN KEY(bag_id) REFERENCES bags(id) ON DELETE CASCADE' : ''}
             )
         `);
-        // Note: PG FKs can be added separately or inline, but inline works if table exists. 
-        // Simplification: We wont enforce strict FK constraints in Schema string for dual mode complexity 
-        // unless we split query strings. For now, basic CREATE is enough, logic handles consistency.
 
-        // ... (Repeating for other tables with type replacements)
-        // Dashboard Lists
         await query(`
             CREATE TABLE IF NOT EXISTS dashboard_lists (
                 id ${typeId},
@@ -279,7 +249,6 @@ async function setupDb() {
             )
         `);
 
-        // Consumables
         await query(`
             CREATE TABLE IF NOT EXISTS consumables (
                 id ${typeId},
@@ -294,7 +263,6 @@ async function setupDb() {
             )
         `);
 
-        // Expenses
         await query(`
             CREATE TABLE IF NOT EXISTS expenses (
                 id ${typeId},
@@ -306,7 +274,6 @@ async function setupDb() {
             )
         `);
 
-        // Brands
         await query(`
             CREATE TABLE IF NOT EXISTS brands (
                 id ${typeId},
@@ -315,7 +282,6 @@ async function setupDb() {
             )
         `);
 
-        // Bag Logs
         await query(`
             CREATE TABLE IF NOT EXISTS bag_logs (
                 id ${typeId},
@@ -326,7 +292,6 @@ async function setupDb() {
             )
         `);
 
-        // Bag Consumables
         await query(`
             CREATE TABLE IF NOT EXISTS bag_consumables (
                 id ${typeId},
@@ -338,20 +303,17 @@ async function setupDb() {
             )
         `);
 
-        // Seed Brands (Helper)
         const brandsCount = await query('SELECT COUNT(*) as count FROM brands');
-        const count = IS_LOCAL ? brandsCount.rows[0].count : brandsCount.rows[0].count; // SQLite returns {count: N}, PG returns {count: 'N'}
+        const count = IS_LOCAL ? brandsCount.rows[0].count : brandsCount.rows[0].count;
         if (parseInt(count) === 0) {
             const defaultBrands = ['Hermès', 'Louis Vuitton', 'Chanel', 'Dior', 'Gucci', 'Prada', 'Celine', 'Saint Laurent', 'Fendi', 'Balenciaga'];
             for (const brand of defaultBrands) {
-                // PG: ON CONFLICT needs compliant query. simple insert ignore logic:
                 try {
                     await query('INSERT INTO brands (name) VALUES (?)', [brand]);
-                } catch (e) { /* ignore unique constraint */ }
+                } catch (e) { /* ignore */ }
             }
         }
 
-        // Seed Admin
         const adminUser = await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
         const admins = await query('SELECT * FROM users WHERE username = ?', ['admin']);
         if (admins.rows.length === 0) {
@@ -368,7 +330,6 @@ async function setupDb() {
 
 setupDb();
 
-// Auth Middleware (No changes needed)
 const auth = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -393,13 +354,11 @@ const validateBag = (req, res, next) => {
     next();
 };
 
-// --- Routes (Using Abstraction) ---
-
 app.post('/api/login', async (req, res) => {
     try {
         const { password } = req.body;
         const result = await query('SELECT * FROM users WHERE username = ?', ['admin']);
-        const user = result.rows[0]; // Works for both thanks to wrapper
+        const user = result.rows[0];
 
         if (user && await bcrypt.compare(password, user.password)) {
             const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
@@ -434,13 +393,11 @@ app.get('/api/bags', auth, async (req, res) => {
         const result = await query('SELECT * FROM bags ORDER BY created_at DESC');
         const bags = result.rows;
 
-        // Fetch images for each bag
         const bagsWithImages = await Promise.all(bags.map(async (bag) => {
             const imgResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
             return { ...bag, images: imgResult.rows };
         }));
-        res.json(bagsWithImages); // is_donation boolean might need conversion if SQlite returns 0/1. Client handles it?
-        // JS treats 1 as true-ish.
+        res.json(bagsWithImages);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
@@ -506,7 +463,6 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
     }
 });
 
-// Logs
 app.get('/api/bags/:id/logs', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM bag_logs WHERE bag_id = ? ORDER BY date DESC, created_at DESC', [req.params.id]);
@@ -539,7 +495,6 @@ app.delete('/api/logs/:id', auth, async (req, res) => {
     }
 });
 
-// Consumables in Bag
 app.get('/api/bags/:id/consumables', auth, async (req, res) => {
     try {
         const sql = `
@@ -615,7 +570,6 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
     }
 });
 
-// Images
 app.post('/api/bags/:id/images', auth, async (req, res) => {
     try {
         const { id } = req.params;
@@ -661,7 +615,6 @@ app.post('/api/upload', auth, upload.single('image'), async (req, res) => {
     }
 });
 
-// Dashboard Lists
 app.get('/api/dashboard-lists', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM dashboard_lists ORDER BY order_index ASC');
@@ -720,7 +673,6 @@ app.post('/api/dashboard-lists/reorder', auth, async (req, res) => {
     }
 });
 
-// Consumables
 app.get('/api/consumables', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM consumables ORDER BY created_at DESC');
@@ -767,7 +719,6 @@ app.delete('/api/consumables/:id', auth, async (req, res) => {
     }
 });
 
-// Expenses
 app.get('/api/expenses', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM expenses ORDER BY date DESC, created_at DESC');
@@ -814,7 +765,6 @@ app.delete('/api/expenses/:id', auth, async (req, res) => {
     }
 });
 
-// CSV Export
 app.get('/api/export/csv', auth, async (req, res) => {
     try {
         const bagsRes = await query('SELECT * FROM bags WHERE status = ?', ['sold']);
@@ -841,7 +791,6 @@ app.get('/api/export/csv', auth, async (req, res) => {
     }
 });
 
-// Brands
 app.get('/api/brands', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM brands ORDER BY name ASC');
