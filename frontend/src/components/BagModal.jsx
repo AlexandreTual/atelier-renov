@@ -91,7 +91,9 @@ function BagModal({
 
                 {/* Avant/Après Slider Visualization */}
                 {beforeImg && afterImg && (
-                    <BeforeAfterSlider beforeImage={beforeImg} afterImage={afterImg} />
+                    <div style={{ marginBottom: '1.5rem' }}>
+                        <BeforeAfterSlider beforeImage={beforeImg} afterImage={afterImg} />
+                    </div>
                 )}
 
                 <form onSubmit={async (e) => {
