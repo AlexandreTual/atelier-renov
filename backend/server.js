@@ -75,6 +75,8 @@ app.use(cors({
 
 app.use(express.json());
 
+app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
 app.use((req, res, next) => {
     console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin}`);
     next();
