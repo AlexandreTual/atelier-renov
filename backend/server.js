@@ -322,6 +322,13 @@ async function setupDb() {
             )
         `);
 
+        await query('CREATE INDEX IF NOT EXISTS idx_images_bag_id ON images(bag_id)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bag_logs_bag_id ON bag_logs(bag_id)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bag_consumables_bag_id ON bag_consumables(bag_id)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bag_consumables_consumable_id ON bag_consumables(consumable_id)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bags_status ON bags(status)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bags_brand ON bags(brand)');
+
         const brandsCount = await query('SELECT COUNT(*) as count FROM brands');
         const count = IS_LOCAL ? brandsCount.rows[0].count : brandsCount.rows[0].count;
         if (parseInt(count) === 0) {
