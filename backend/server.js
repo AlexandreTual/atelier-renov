@@ -358,8 +358,6 @@ async function setupDb() {
     }
 }
 
-setupDb();
-
 const auth = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -872,6 +870,14 @@ app.post('/api/brands', auth, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+async function start() {
+    await setupDb();
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+start().catch(err => {
+    console.error('FATAL: Failed to start server:', err);
+    process.exit(1);
 });
