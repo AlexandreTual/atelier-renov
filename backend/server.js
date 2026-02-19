@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
@@ -25,8 +27,13 @@ if (IS_LOCAL) {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret';
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin';
+
+const JWT_SECRET = process.env.JWT_SECRET;
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+if (!JWT_SECRET || !ADMIN_PASSWORD) {
+    console.error('FATAL: JWT_SECRET and ADMIN_PASSWORD environment variables must be set');
+    process.exit(1);
+}
 
 // --- Cloudinary Config (Cloud Mode) ---
 if (!IS_LOCAL) {
@@ -38,6 +45,7 @@ if (!IS_LOCAL) {
 }
 
 // --- Middleware ---
+app.use(helmet());
 
 // Simplify allowedOrigins calculation
 const getAllowedOrigins = () => [
@@ -57,7 +65,7 @@ app.use(cors({
             callback(null, true);
         } else {
             console.warn(`Blocked by CORS: ${origin}. Allowed: ${allowed.join(', ')}`);
-            callback(null, true); // TEMPORARY: Allow all
+            callback(new Error(`CORS: origin ${origin} not allowed`));
         }
     },
     credentials: true,
@@ -350,8 +358,6 @@ async function setupDb() {
     }
 }
 
-setupDb();
-
 const auth = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
@@ -376,7 +382,13 @@ const validateBag = (req, res, next) => {
     next();
 };
 
-app.post('/api/login', async (req, res) => {
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
+});
+
+app.post('/api/login', loginLimiter, async (req, res) => {
     try {
         const { password } = req.body;
         const result = await query('SELECT * FROM users WHERE username = ?', ['admin']);
@@ -858,6 +870,14 @@ app.post('/api/brands', auth, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+async function start() {
+    await setupDb();
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+}
+
+start().catch(err => {
+    console.error('FATAL: Failed to start server:', err);
+    process.exit(1);
 });
