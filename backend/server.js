@@ -426,14 +426,24 @@ app.post('/api/change-password', auth, async (req, res) => {
 
 app.get('/api/bags', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM bags ORDER BY created_at DESC');
-        const bags = result.rows;
+        const bagsResult = await query('SELECT * FROM bags ORDER BY created_at DESC');
+        const bags = bagsResult.rows;
 
-        const bagsWithImages = await Promise.all(bags.map(async (bag) => {
-            const imgResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
-            return { ...bag, images: imgResult.rows };
-        }));
-        res.json(bagsWithImages);
+        if (bags.length === 0) return res.json([]);
+
+        const placeholders = bags.map(() => '?').join(', ');
+        const imagesResult = await query(
+            `SELECT * FROM images WHERE bag_id IN (${placeholders})`,
+            bags.map(b => b.id)
+        );
+
+        const imagesByBagId = {};
+        for (const img of imagesResult.rows) {
+            if (!imagesByBagId[img.bag_id]) imagesByBagId[img.bag_id] = [];
+            imagesByBagId[img.bag_id].push(img);
+        }
+
+        res.json(bags.map(bag => ({ ...bag, images: imagesByBagId[bag.id] || [] })));
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'Internal server error' });
