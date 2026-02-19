@@ -141,6 +141,38 @@ const insertAndGetId = async (sql, params) => {
     }
 };
 
+const withTransaction = async (fn) => {
+    if (IS_LOCAL) {
+        await db.run('BEGIN');
+        try {
+            const result = await fn(query);
+            await db.run('COMMIT');
+            return result;
+        } catch (err) {
+            await db.run('ROLLBACK');
+            throw err;
+        }
+    } else {
+        const client = await db.connect();
+        const txQuery = async (sql, params = []) => {
+            let paramIndex = 1;
+            const pgSql = sql.replace(/\?/g, () => `$${paramIndex++}`);
+            return client.query(pgSql, params);
+        };
+        try {
+            await client.query('BEGIN');
+            const result = await fn(txQuery);
+            await client.query('COMMIT');
+            return result;
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    }
+};
+
 // --- Storage Abstraction Layer ---
 
 const saveImage = async (buffer) => {
@@ -556,20 +588,20 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
 
         const cost = (consumable.purchase_price || 0) * (usage_percent / 100);
 
-        await query(
-            'INSERT INTO bag_consumables (bag_id, consumable_id, used_percentage, cost_at_time) VALUES (?, ?, ?, ?)',
-            [bag_id, consumable_id, usage_percent, cost]
-        );
-
-        await query(
-            'UPDATE consumables SET remaining_percentage = remaining_percentage - ? WHERE id = ?',
-            [usage_percent, consumable_id]
-        );
-
-        await query(
-            'UPDATE bags SET material_costs = material_costs + ? WHERE id = ?',
-            [cost, bag_id]
-        );
+        await withTransaction(async (txQuery) => {
+            await txQuery(
+                'INSERT INTO bag_consumables (bag_id, consumable_id, used_percentage, cost_at_time) VALUES (?, ?, ?, ?)',
+                [bag_id, consumable_id, usage_percent, cost]
+            );
+            await txQuery(
+                'UPDATE consumables SET remaining_percentage = remaining_percentage - ? WHERE id = ?',
+                [usage_percent, consumable_id]
+            );
+            await txQuery(
+                'UPDATE bags SET material_costs = material_costs + ? WHERE id = ?',
+                [cost, bag_id]
+            );
+        });
 
         res.json({ success: true, cost_added: cost });
 
@@ -584,19 +616,20 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
         const link = result.rows[0];
         if (!link) return res.status(404).json({ error: 'Link not found' });
 
-        await query(
-            'UPDATE bags SET material_costs = material_costs - ? WHERE id = ?',
-            [link.cost_at_time, link.bag_id]
-        );
-
-        if (link.consumable_id) {
-            await query(
-                'UPDATE consumables SET remaining_percentage = remaining_percentage + ? WHERE id = ?',
-                [link.used_percentage, link.consumable_id]
+        await withTransaction(async (txQuery) => {
+            await txQuery(
+                'UPDATE bags SET material_costs = material_costs - ? WHERE id = ?',
+                [link.cost_at_time, link.bag_id]
             );
-        }
+            if (link.consumable_id) {
+                await txQuery(
+                    'UPDATE consumables SET remaining_percentage = remaining_percentage + ? WHERE id = ?',
+                    [link.used_percentage, link.consumable_id]
+                );
+            }
+            await txQuery('DELETE FROM bag_consumables WHERE id = ?', [req.params.id]);
+        });
 
-        await query('DELETE FROM bag_consumables WHERE id = ?', [req.params.id]);
         res.json({ success: true });
 
     } catch (err) {
