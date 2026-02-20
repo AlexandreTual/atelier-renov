@@ -233,7 +233,7 @@ async function setupDb() {
     try {
         if (IS_LOCAL) {
             db = await open({
-                filename: './database.sqlite',
+                filename: process.env.SQLITE_PATH || './database.sqlite',
                 driver: sqlite3.Database
             });
             logger.info('Connected to SQLite');
@@ -513,15 +513,16 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
             purchase_source, is_donation, item_type
         } = req.body;
 
-        await query(
-            `UPDATE bags SET 
-                name = ?, brand = ?, purchase_price = ?, target_resale_price = ?, 
-                actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?, 
+        const result = await query(
+            `UPDATE bags SET
+                name = ?, brand = ?, purchase_price = ?, target_resale_price = ?,
+                actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?,
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
                 purchase_source = ?, is_donation = ?, item_type = ?
             WHERE id = ?`,
             [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', id]
         );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Bag not found' });
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
@@ -977,6 +978,16 @@ app.get('/api/bags/:id', auth, async (req, res) => {
     }
 });
 
+async function closeDb() {
+    if (!db) return;
+    if (IS_LOCAL) {
+        await db.close();
+    } else {
+        await db.end();
+    }
+    db = null;
+}
+
 async function start() {
     await setupDb();
     app.listen(PORT, () => {
@@ -984,7 +995,11 @@ async function start() {
     });
 }
 
-start().catch(err => {
-    logger.fatal({ err }, 'Failed to start server');
-    process.exit(1);
-});
+if (require.main === module) {
+    start().catch(err => {
+        logger.fatal({ err }, 'Failed to start server');
+        process.exit(1);
+    });
+}
+
+module.exports = { app, setupDb, closeDb };
