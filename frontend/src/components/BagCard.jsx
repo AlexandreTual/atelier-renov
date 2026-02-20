@@ -5,8 +5,8 @@ import { STATUSES } from '../constants'
 function BagCard({ bag, onClick }) {
   const currentStatus = STATUSES[bag.status] || STATUSES.to_be_cleaned
   const profit = bag.status === 'sold'
-    ? (bag.actual_resale_price - bag.purchase_price - (bag.fees || 0) - (bag.material_costs || 0))
-    : (bag.target_resale_price - bag.purchase_price - (bag.material_costs || 0))
+    ? ((bag.actual_resale_price || 0) - (bag.purchase_price || 0) - (bag.fees || 0) - (bag.material_costs || 0))
+    : ((bag.target_resale_price || 0) - (bag.purchase_price || 0) - (bag.material_costs || 0))
 
   const mainImage = bag.images && bag.images.length > 0 ? bag.images[0].url : null
 

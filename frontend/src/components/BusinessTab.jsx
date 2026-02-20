@@ -66,6 +66,7 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
             document.body.appendChild(a)
             a.click()
             a.remove()
+            window.URL.revokeObjectURL(url)
             toast.success('Export téléchargé', { id: loadingToast })
         } catch (err) {
             console.error('Failed to export CSV', err)
