@@ -30,7 +30,8 @@ describe('BagCard', () => {
     it('shows the correct status badge for "sold"', () => {
         const soldBag = { ...baseBag, status: 'sold', actual_resale_price: 1100 };
         render(<BagCard bag={soldBag} onClick={vi.fn()} />);
-        expect(screen.getByText('Vendu')).toBeInTheDocument();
+        // "Vendu" appears in both the status badge and the price column for sold items
+        expect(screen.getAllByText('Vendu').length).toBeGreaterThanOrEqual(1);
     });
 
     it('shows the correct status badge for "to_be_cleaned"', () => {
