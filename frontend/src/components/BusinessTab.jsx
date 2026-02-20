@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Plus, Trash2, Download, Calculator, TrendingUp, TrendingDown } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import StatCard from './StatCard'
 
 function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
@@ -23,32 +24,53 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
                 setShowModal(false)
                 fetchExpenses()
                 setFormData({ description: '', amount: 0, category: 'other', date: new Date().toISOString().split('T')[0] })
+                toast.success('Dépense ajoutée')
+            } else {
+                toast.error('Erreur lors de l\'enregistrement')
             }
         } catch (err) {
             console.error('Failed to save expense', err)
+            toast.error('Échec de la communication avec le serveur')
         }
     }
 
     const handleDelete = async (id) => {
         if (!confirm('Supprimer cette dépense ?')) return
         try {
-            await authenticatedFetch(`/api/expenses/${id}`, { method: 'DELETE' })
-            fetchExpenses()
+            const resp = await authenticatedFetch(`/api/expenses/${id}`, { method: 'DELETE' })
+            if (resp.ok) {
+                fetchExpenses()
+                toast.success('Dépense supprimée')
+            } else {
+                toast.error('Erreur lors de la suppression')
+            }
         } catch (err) {
             console.error('Failed to delete expense', err)
+            toast.error('Échec de la suppression')
         }
     }
 
     const exportCSV = async () => {
-        const resp = await authenticatedFetch('/api/export/csv')
-        const blob = await resp.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'tableau_de_bord_atelier.csv'
-        document.body.appendChild(a)
-        a.click()
-        a.remove()
+        const loadingToast = toast.loading('Export en cours...')
+        try {
+            const resp = await authenticatedFetch('/api/export/csv')
+            if (!resp.ok) {
+                toast.error('Erreur lors de l\'export', { id: loadingToast })
+                return
+            }
+            const blob = await resp.blob()
+            const url = window.URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = 'tableau_de_bord_atelier.csv'
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            toast.success('Export téléchargé', { id: loadingToast })
+        } catch (err) {
+            console.error('Failed to export CSV', err)
+            toast.error('Échec de l\'export', { id: loadingToast })
+        }
     }
 
     // Calculations

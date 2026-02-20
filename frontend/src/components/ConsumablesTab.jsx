@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Trash2, Edit2, Package } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 
 function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
@@ -47,19 +48,29 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
             if (resp.ok) {
                 setShowModal(false)
                 fetchConsumables()
+                toast.success(selectedItem ? 'Produit mis à jour' : 'Produit ajouté')
+            } else {
+                toast.error('Erreur lors de l\'enregistrement')
             }
         } catch (err) {
             console.error('Failed to save consumable', err)
+            toast.error('Échec de la communication avec le serveur')
         }
     }
 
     const handleDelete = async (id) => {
         if (!confirm('Supprimer ce produit ?')) return
         try {
-            await authenticatedFetch(`/api/consumables/${id}`, { method: 'DELETE' })
-            fetchConsumables()
+            const resp = await authenticatedFetch(`/api/consumables/${id}`, { method: 'DELETE' })
+            if (resp.ok) {
+                fetchConsumables()
+                toast.success('Produit supprimé')
+            } else {
+                toast.error('Erreur lors de la suppression')
+            }
         } catch (err) {
             console.error('Failed to delete consumable', err)
+            toast.error('Échec de la suppression')
         }
     }
 

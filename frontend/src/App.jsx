@@ -34,7 +34,7 @@ function App() {
   const [showModal, setShowModal] = useState(false)
   const [selectedBag, setSelectedBag] = useState(null)
   const [formData, setFormData] = useState({
-    name: '', brand: '', item_type: 'Sac', purchase_price: 0, target_resale_price: 0,
+    name: '', brand: '', item_type: '', purchase_price: 0, target_resale_price: 0,
     actual_resale_price: 0, status: 'to_be_cleaned', fees: 0,
     material_costs: 0, notes: '', purchase_source: '', is_donation: 0, images: []
   })
@@ -63,7 +63,7 @@ function App() {
       setSelectedBag(bag)
       setFormData({
         ...bag,
-        item_type: bag.item_type || 'Sac',
+        item_type: bag.item_type || '',
         images: bag.images || [],
         purchase_price: bag.purchase_price !== undefined ? Number(bag.purchase_price).toFixed(2) : '',
         target_resale_price: bag.target_resale_price !== undefined ? Number(bag.target_resale_price).toFixed(2) : '',
@@ -74,7 +74,7 @@ function App() {
     } else {
       setSelectedBag(null)
       setFormData({
-        name: '', brand: '', item_type: 'Sac', purchase_price: '', target_resale_price: '',
+        name: '', brand: '', item_type: '', purchase_price: '', target_resale_price: '',
         actual_resale_price: '', status: 'to_be_cleaned', fees: '',
         material_costs: '', notes: '', purchase_source: '', is_donation: 0, images: []
       })

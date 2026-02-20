@@ -9,6 +9,10 @@ const multer = require('multer');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const stream = require('stream');
+const pino = require('pino');
+const pinoHttp = require('pino-http');
+
+const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 // --- Dual Mode Config ---
 const IS_LOCAL = process.env.USE_LOCAL_MODE === 'true';
@@ -18,11 +22,11 @@ let sqlite3, open, Pool, cloudinary;
 if (IS_LOCAL) {
     sqlite3 = require('sqlite3');
     open = require('sqlite').open;
-    console.log('🌍 OPERATING IN LOCAL MODE (SQLite + Local Uploads)');
+    logger.info('Operating in local mode (SQLite + local uploads)');
 } else {
     Pool = require('pg').Pool;
     cloudinary = require('cloudinary').v2;
-    console.log('☁️ OPERATING IN CLOUD MODE (PostgreSQL + Cloudinary)');
+    logger.info('Operating in cloud mode (PostgreSQL + Cloudinary)');
 }
 
 const app = express();
@@ -31,7 +35,7 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 if (!JWT_SECRET || !ADMIN_PASSWORD) {
-    console.error('FATAL: JWT_SECRET and ADMIN_PASSWORD environment variables must be set');
+    logger.fatal('Missing JWT_SECRET or ADMIN_PASSWORD — shutting down');
     process.exit(1);
 }
 
@@ -64,7 +68,7 @@ app.use(cors({
         if (process.env.FRONTEND_URL === '*' || isAllowed) {
             callback(null, true);
         } else {
-            console.warn(`Blocked by CORS: ${origin}. Allowed: ${allowed.join(', ')}`);
+            logger.warn({ origin, allowed }, 'Request blocked by CORS');
             callback(new Error(`CORS: origin ${origin} not allowed`));
         }
     },
@@ -77,10 +81,7 @@ app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url} - Origin: ${req.headers.origin}`);
-    next();
-});
+app.use(pinoHttp({ logger }));
 
 // Serve local uploads if in local mode
 if (IS_LOCAL) {
@@ -221,7 +222,7 @@ const deleteImage = async (imageObj) => {
             try {
                 await cloudinary.uploader.destroy(imageObj.public_id);
             } catch (err) {
-                console.error('Cloudinary delete error:', err);
+                logger.error({ err }, 'Cloudinary delete error');
             }
         }
     }
@@ -235,13 +236,13 @@ async function setupDb() {
                 filename: './database.sqlite',
                 driver: sqlite3.Database
             });
-            console.log('Connected to SQLite');
+            logger.info('Connected to SQLite');
         } else {
             db = new Pool({
                 connectionString: process.env.DATABASE_URL,
                 ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
             });
-            console.log('Connected to PostgreSQL');
+            logger.info('Connected to PostgreSQL');
         }
 
         const typeId = IS_LOCAL ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'SERIAL PRIMARY KEY';
@@ -390,12 +391,12 @@ async function setupDb() {
         if (admins.rows.length === 0) {
             const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
             await query('INSERT INTO users (username, password) VALUES (?, ?)', ['admin', hashedPassword]);
-            console.log('Admin user created');
+            logger.info('Admin user created');
         }
 
-        console.log(`Database initialized in ${IS_LOCAL ? 'LOCAL' : 'CLOUD'} mode.`);
+        logger.info({ mode: IS_LOCAL ? 'LOCAL' : 'CLOUD' }, 'Database initialized');
     } catch (err) {
-        console.error('Database initialization failed:', err);
+        logger.error({ err }, 'Database initialization failed');
     }
 }
 
@@ -441,7 +442,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         }
         res.status(401).json({ error: 'Mot de passe incorrect' });
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Erreur lors de la connexion' });
     }
 });
@@ -484,7 +485,7 @@ app.get('/api/bags', auth, async (req, res) => {
 
         res.json(bags.map(bag => ({ ...bag, images: imagesByBagId[bag.id] || [] })));
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -498,7 +499,7 @@ app.post('/api/bags', auth, validateBag, async (req, res) => {
         );
         res.json({ id });
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Failed to create bag' });
     }
 });
@@ -519,11 +520,11 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
                 purchase_source = ?, is_donation = ?, item_type = ?
             WHERE id = ?`,
-            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', id]
+            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', id]
         );
         res.json({ success: true });
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Failed to update bag' });
     }
 });
@@ -539,11 +540,13 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
             await deleteImage(img);
         }
 
+        // Explicit delete for PostgreSQL (no ON DELETE CASCADE on images table)
+        await query('DELETE FROM images WHERE bag_id = ?', [id]);
         await query('DELETE FROM bags WHERE id = ?', [id]);
 
         res.json({ success: true });
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Failed to delete bag' });
     }
 });
@@ -666,7 +669,7 @@ app.post('/api/bags/:id/images', auth, async (req, res) => {
         );
         res.json({ id: imageId, url });
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Failed to link image' });
     }
 });
@@ -682,7 +685,7 @@ app.delete('/api/images/:id', auth, async (req, res) => {
         }
         res.json({ success: true });
     } catch (err) {
-        console.error(err);
+        logger.error({ err });
         res.status(500).json({ error: 'Failed to delete image' });
     }
 });
@@ -696,7 +699,7 @@ app.post('/api/upload', auth, upload.single('image'), async (req, res) => {
         const result = await saveImage(req.file.buffer);
         res.json(result); // { url, public_id }
     } catch (err) {
-        console.error('Image processing failed:', err);
+        logger.error({ err }, 'Image processing failed');
         res.status(500).json({ error: 'Failed to process image' });
     }
 });
@@ -922,14 +925,66 @@ app.post('/api/brands', auth, async (req, res) => {
     }
 });
 
+app.put('/api/brands/:id', auth, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name required' });
+        await query('UPDATE brands SET name = ? WHERE id = ?', [name, req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update brand' });
+    }
+});
+
+app.delete('/api/brands/:id', auth, async (req, res) => {
+    try {
+        await query('DELETE FROM brands WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete brand' });
+    }
+});
+
+app.put('/api/item-types/:id', auth, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name required' });
+        await query('UPDATE item_types SET name = ? WHERE id = ?', [name, req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update item type' });
+    }
+});
+
+app.delete('/api/item-types/:id', auth, async (req, res) => {
+    try {
+        await query('DELETE FROM item_types WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete item type' });
+    }
+});
+
+app.get('/api/bags/:id', auth, async (req, res) => {
+    try {
+        const bagResult = await query('SELECT * FROM bags WHERE id = ?', [req.params.id]);
+        if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Bag not found' });
+        const bag = bagResult.rows[0];
+        const imagesResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
+        res.json({ ...bag, images: imagesResult.rows });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch bag' });
+    }
+});
+
 async function start() {
     await setupDb();
     app.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
+        logger.info({ port: PORT }, 'Server started');
     });
 }
 
 start().catch(err => {
-    console.error('FATAL: Failed to start server:', err);
+    logger.fatal({ err }, 'Failed to start server');
     process.exit(1);
 });
