@@ -233,9 +233,10 @@ async function setupDb() {
     try {
         if (IS_LOCAL) {
             db = await open({
-                filename: './database.sqlite',
+                filename: process.env.SQLITE_PATH || './database.sqlite',
                 driver: sqlite3.Database
             });
+            await db.run('PRAGMA foreign_keys = ON');
             logger.info('Connected to SQLite');
         } else {
             db = new Pool({
@@ -278,8 +279,8 @@ async function setupDb() {
                 url TEXT NOT NULL,
                 public_id TEXT,
                 type TEXT,
-                created_at ${typeTimestamp}
-                ${IS_LOCAL ? ', FOREIGN KEY(bag_id) REFERENCES bags(id) ON DELETE CASCADE' : ''}
+                created_at ${typeTimestamp},
+                FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE
             )
         `);
 
@@ -342,7 +343,8 @@ async function setupDb() {
                 bag_id INTEGER,
                 action TEXT NOT NULL,
                 date TEXT,
-                created_at ${typeTimestamp}
+                created_at ${typeTimestamp},
+                FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE
             )
         `);
 
@@ -353,9 +355,27 @@ async function setupDb() {
                 consumable_id INTEGER,
                 used_percentage REAL DEFAULT 0,
                 cost_at_time REAL DEFAULT 0,
-                created_at ${typeTimestamp}
+                created_at ${typeTimestamp},
+                FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE
             )
         `);
+
+        // Migration : add FK constraints on existing PostgreSQL tables (idempotent)
+        if (!IS_LOCAL) {
+            const fkMigrations = [
+                `DO $$ BEGIN ALTER TABLE images ADD CONSTRAINT fk_images_bag_id FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+                `DO $$ BEGIN ALTER TABLE bag_logs ADD CONSTRAINT fk_bag_logs_bag_id FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+                `DO $$ BEGIN ALTER TABLE bag_consumables ADD CONSTRAINT fk_bag_consumables_bag_id FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+            ];
+            for (const sql of fkMigrations) {
+                try { await db.query(sql); } catch (e) { /* ignore */ }
+            }
+        }
+
+        // Cleanup orphaned rows (belt-and-suspenders for existing data in production)
+        await query('DELETE FROM images WHERE bag_id NOT IN (SELECT id FROM bags)');
+        await query('DELETE FROM bag_logs WHERE bag_id NOT IN (SELECT id FROM bags)');
+        await query('DELETE FROM bag_consumables WHERE bag_id NOT IN (SELECT id FROM bags)');
 
         await query('CREATE INDEX IF NOT EXISTS idx_images_bag_id ON images(bag_id)');
         await query('CREATE INDEX IF NOT EXISTS idx_bag_logs_bag_id ON bag_logs(bag_id)');
@@ -513,15 +533,16 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
             purchase_source, is_donation, item_type
         } = req.body;
 
-        await query(
-            `UPDATE bags SET 
-                name = ?, brand = ?, purchase_price = ?, target_resale_price = ?, 
-                actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?, 
+        const result = await query(
+            `UPDATE bags SET
+                name = ?, brand = ?, purchase_price = ?, target_resale_price = ?,
+                actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?,
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
                 purchase_source = ?, is_donation = ?, item_type = ?
             WHERE id = ?`,
             [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', id]
         );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Bag not found' });
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
@@ -540,7 +561,9 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
             await deleteImage(img);
         }
 
-        // Explicit delete for PostgreSQL (no ON DELETE CASCADE on images table)
+        // Explicit cleanup for all child tables (belt-and-suspenders alongside FK CASCADE)
+        await query('DELETE FROM bag_logs WHERE bag_id = ?', [id]);
+        await query('DELETE FROM bag_consumables WHERE bag_id = ?', [id]);
         await query('DELETE FROM images WHERE bag_id = ?', [id]);
         await query('DELETE FROM bags WHERE id = ?', [id]);
 
@@ -977,6 +1000,16 @@ app.get('/api/bags/:id', auth, async (req, res) => {
     }
 });
 
+async function closeDb() {
+    if (!db) return;
+    if (IS_LOCAL) {
+        await db.close();
+    } else {
+        await db.end();
+    }
+    db = null;
+}
+
 async function start() {
     await setupDb();
     app.listen(PORT, () => {
@@ -984,7 +1017,11 @@ async function start() {
     });
 }
 
-start().catch(err => {
-    logger.fatal({ err }, 'Failed to start server');
-    process.exit(1);
-});
+if (require.main === module) {
+    start().catch(err => {
+        logger.fatal({ err }, 'Failed to start server');
+        process.exit(1);
+    });
+}
+
+module.exports = { app, setupDb, closeDb };
