@@ -1,18 +1,9 @@
 import React, { useState } from 'react'
-import { X, Trash2, Image as ImageIcon, Clock, CheckCircle2, TrendingUp, Plus, Loader2, Camera } from 'lucide-react'
+import { X, Trash2, Image as ImageIcon, Plus, Loader2, Camera } from 'lucide-react'
 import BeforeAfterSlider from './BeforeAfterSlider'
 import BagLog from './BagLog'
 import BagConsumables from './BagConsumables'
-
-const STATUSES = {
-    to_be_cleaned: { label: 'À nettoyer', color: '#666', icon: <Clock size={16} /> },
-    cleaning: { label: 'Nettoyage', color: '#3498db', icon: <Clock size={16} /> },
-    repairing: { label: 'Réparation', color: '#e67e22', icon: <Clock size={16} /> },
-    drying: { label: 'Séchage', color: '#1abc9c', icon: <Clock size={16} /> },
-    ready_for_sale: { label: 'Prêt à la vente', color: '#9b59b6', icon: <CheckCircle2 size={16} /> },
-    selling: { label: 'En vente', color: '#f1c40f', icon: <TrendingUp size={16} /> },
-    sold: { label: 'Vendu', color: '#2ecc71', icon: <CheckCircle2 size={16} /> }
-}
+import { STATUSES } from '../constants'
 
 function BagModal({
     show,
@@ -123,7 +114,7 @@ function BagModal({
                                 list="types-list"
                                 value={formData.item_type || ''}
                                 onChange={e => setFormData({ ...formData, item_type: e.target.value })}
-                                placeholder="ex: Sac"
+                                placeholder="ex: Sac, Chaussures, Vêtement"
                             />
                             <datalist id="types-list">
                                 {itemTypes.map(t => (
