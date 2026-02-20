@@ -1,32 +1,98 @@
-# Feuille de Route (Roadmap) - Atelier Rénov
+# Feuille de Route (Roadmap) - Atelier Rénov'
 
-Ce document liste les améliorations et nouvelles fonctionnalités prévues pour l'application.
+---
 
-## 🛠️ Améliorations Techniques (Fondation)
-- [x] **Refactoring React** : Extraire la logique du `App.jsx` dans des hooks (`useBags`, `useAuth`)
-- [x] **Routage** : Implémenter React Router pour avoir des URLs uniques par page/sac
-- [x] **Système de Notifs** : Ajouter des Toasts pour confirmer les actions (succès/erreur)
-- [x] **Optimisation Image** : Redimensionnement automatique des images côté serveur pour la performance
-- [x] **Sécurité** : Gestion de session plus robuste et interface de changement de mot de passe
+## ✅ Infrastructure technique (terminé)
 
-## ✨ Nouvelles Fonctionnalités
-### 🎨 Atelier & Rénovation
-- [x] **Slider Avant/Après** : Comparateur visuel interactif pour les fiches produits
-- [x] **Journal de Bord** : Historique des étapes de soin daté pour chaque sac
-- [ ] **Liaison Matières** : Déduire automatiquement le coût des consommables utilisés sur un sac
-- [ ] **Générateur de Fiche Vinted** : Bouton pour copier une description optimisée pour la vente
+- [x] Backend : Node.js (Express) + SQLite local / PostgreSQL prod
+- [x] Frontend : React 19 (Vite 7) — pure JavaScript, pas de TypeScript
+- [x] Authentification : JWT 7 jours, bcrypt, rate limiting login
+- [x] Sécurité : Helmet, CORS whitelist, fail fast si secrets manquants
+- [x] Logging : Pino structuré (niveau configurable via LOG_LEVEL)
+- [x] Docker : multi-stage build, non-root user, healthcheck, restart policy
+- [x] CI/CD : GitHub Actions (backend-tests + frontend-tests + frontend-build)
+- [x] Auto-merge : `gh pr merge --auto --squash` après `sleep 8`
+- [x] Branch protection : 3 checks requis sur master
+- [x] Tests : Jest + Supertest (backend), Vitest + @testing-library/react (frontend)
 
-### 📈 Business & Analyse
-- [ ] **Graphiques de Performance** : Vue mensuelle du CA et des marges (Recharts)
-- [ ] **Indicateurs de Rentabilité** : Calcul automatique du ROI et de la marge % par sac
-- [ ] **Gestion des Listings** : Champs pour liens directs vers les annonces (Vinted, VC)
-- [ ] **Alertes Stocks** : Notification visuelle quand un consommable est presque vide
+---
 
-### 📱 Expérience Utilisateur (UX)
-- [ ] **Mode Sombre** : Alternative visuelle pour le confort
-- [ ] **Recherche Avancée** : Filtrage par plage de prix, date ou niveau de rentabilité
-- [ ] **Skeletons** : États de chargement élégants pour éviter les sauts d'interface
+## ✅ Gestion de l'Inventaire (terminé)
 
-## 🌐 Expansion
-- [ ] **Multi-utilisateurs** : Permettre à plusieurs artisans de partager le même inventaire
-- [ ] **API Externe** : Connexion possible avec des APIs de transporteurs ou de plateformes de vente
+- [x] CRUD articles (sacs, chaussures, etc.) avec statuts
+- [x] Gestion des marques et types d'articles (référentiels)
+- [x] Détails financiers : prix achat, frais, coût matières, prix revente cible/réel
+- [x] Photos avant/après : upload → Sharp WebP → local ou Cloudinary
+- [x] Slider comparateur Avant/Après interactif
+- [x] Visionneuse plein écran
+- [x] Journal de bord daté par article
+- [x] Consommables liés par article (transactions SQL)
+- [x] Filtres : recherche texte, marque, statut, type d'article
+- [x] Tri : date récente/ancienne, marque A→Z, prix ↑/↓
+- [x] Loading state et empty states distincts
+
+---
+
+## ✅ Dashboard & Business (terminé)
+
+- [x] KPIs globaux (profit réalisé, stock estimé, capital immobilisé)
+- [x] Listes personnalisables basées sur les statuts
+- [x] Exportation CSV des ventes et dépenses
+- [x] Gestion des consommables (stock, niveau restant, coût)
+- [x] Suivi des dépenses générales
+- [x] Paramètres : changement de mot de passe
+
+---
+
+## ✅ Qualité & Correctifs (terminé)
+
+- [x] Éliminer N+1 queries sur GET /api/bags (JOIN + images batch)
+- [x] Index sur colonnes FK
+- [x] Foreign Keys + ON DELETE CASCADE (SQLite + PostgreSQL)
+- [x] Transactions sur opérations consommables
+- [x] Toasts d'erreur sur toutes les actions CRUD
+- [x] Centraliser STATUSES (label, couleur, icône)
+- [x] Supprimer labels "sac" obsolètes dans le code
+
+---
+
+## ✅ Sécurité & Bugs (audit 2026-02-21, terminé)
+
+- [x] CORS : `startsWith()` → `===` pour bloquer les sous-domaines malicieux (#33)
+- [x] Validation backend sur `/api/change-password` (#34)
+- [x] `resp.ok` check manquant dans useProjectData.js — crash silencieux (#35)
+- [x] Memory leak `createObjectURL` sans `revokeObjectURL` (#36)
+- [x] `JSON.parse` sans try-catch sur dashboard-lists (#37)
+- [x] `remaining_percentage` peut aller négatif (#38)
+- [x] `useEffect` dépendances manquantes dans BagConsumables + BagLog (#39)
+- [x] Calculs financiers non défensifs — NaN possible (#40)
+- [x] Rate limiting global + strict sur `/api/upload` (#41)
+- [x] Whitelist MIME type sur Multer (#42)
+- [x] Toast sur erreurs de fetch silencieuses (#43)
+- [x] Dead code + `err.message` exposé dans server.js (#44)
+- [x] "Nouveau sac" → "Nouvel article" dans Header (#45)
+- [x] `==` → `===` dans BagConsumables (#46)
+
+---
+
+## 💡 Fonctionnalités futures (backlog)
+
+### Atelier & Rénovation
+- [ ] **Liaison Matières** : déduire automatiquement le coût des consommables d'un article
+- [ ] **Générateur de Fiche Vinted** : copier une description optimisée pour la vente
+
+### Business & Analyse
+- [ ] **Graphiques de Performance** : vue mensuelle CA et marges (Recharts)
+- [ ] **Indicateurs de Rentabilité** : ROI et marge % par article
+- [ ] **Gestion des Listings** : liens vers annonces Vinted, Vestiaire Collective
+- [ ] **Alertes Stocks** : notification visuelle si consommable presque vide
+
+### UX
+- [ ] **Skeletons** : états de chargement élégants
+- [ ] **Persistance des filtres** : localStorage pour survivre au refresh
+- [ ] **Recherche Avancée** : plage de prix, date, rentabilité
+- [ ] **Mode Sombre**
+
+### Scalabilité
+- [ ] **Pagination** sur GET /api/bags (performance avec 500+ articles)
+- [ ] **Multi-utilisateurs** : plusieurs artisans sur le même inventaire
