@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { toast } from 'react-hot-toast';
 
 export const useItemTypeActions = (authenticatedFetch, onSuccess) => {
     const handleAddItemType = useCallback(async (name) => {
@@ -12,8 +13,10 @@ export const useItemTypeActions = (authenticatedFetch, onSuccess) => {
                 onSuccess();
                 return true;
             }
+            toast.error('Erreur lors de l\'ajout du type');
         } catch (err) {
             console.error('Failed to add item type', err);
+            toast.error('Échec de l\'ajout du type');
         }
         return false;
     }, [authenticatedFetch, onSuccess]);
