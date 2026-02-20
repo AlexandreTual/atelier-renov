@@ -519,7 +519,7 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
                 purchase_source = ?, is_donation = ?, item_type = ?
             WHERE id = ?`,
-            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', id]
+            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -539,6 +539,8 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
             await deleteImage(img);
         }
 
+        // Explicit delete for PostgreSQL (no ON DELETE CASCADE on images table)
+        await query('DELETE FROM images WHERE bag_id = ?', [id]);
         await query('DELETE FROM bags WHERE id = ?', [id]);
 
         res.json({ success: true });

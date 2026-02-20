@@ -37,7 +37,7 @@ export const useBagActions = (authenticatedFetch, onSuccess) => {
                 } else {
                     setFormData(prev => ({
                         ...prev,
-                        images: Array.isArray(prev.images) ? [...prev.images, { url: data.url, type: type || 'other', id: Date.now(), public_id: data.public_id }] : [{ url: data.url, type: type || 'other', id: Date.now(), public_id: data.public_id }]
+                        images: Array.isArray(prev.images) ? [...prev.images, { url: data.url, type: type || 'other', _pending: true, public_id: data.public_id }] : [{ url: data.url, type: type || 'other', _pending: true, public_id: data.public_id }]
                     }));
                     toast.success('Image importée', { id: loadingToast });
                 }
@@ -51,7 +51,7 @@ export const useBagActions = (authenticatedFetch, onSuccess) => {
     }, [authenticatedFetch, onSuccess]);
 
     const handleImageDelete = useCallback(async (img, setFormData) => {
-        if (img.id && img.id < 1000000000) {
+        if (img.id && !img._pending) {
             try {
                 await authenticatedFetch(`/api/images/${img.id}`, { method: 'DELETE' });
                 setFormData(prev => ({
