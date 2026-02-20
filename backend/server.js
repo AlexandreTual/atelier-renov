@@ -236,6 +236,7 @@ async function setupDb() {
                 filename: process.env.SQLITE_PATH || './database.sqlite',
                 driver: sqlite3.Database
             });
+            await db.run('PRAGMA foreign_keys = ON');
             logger.info('Connected to SQLite');
         } else {
             db = new Pool({
@@ -278,8 +279,8 @@ async function setupDb() {
                 url TEXT NOT NULL,
                 public_id TEXT,
                 type TEXT,
-                created_at ${typeTimestamp}
-                ${IS_LOCAL ? ', FOREIGN KEY(bag_id) REFERENCES bags(id) ON DELETE CASCADE' : ''}
+                created_at ${typeTimestamp},
+                FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE
             )
         `);
 
@@ -342,7 +343,8 @@ async function setupDb() {
                 bag_id INTEGER,
                 action TEXT NOT NULL,
                 date TEXT,
-                created_at ${typeTimestamp}
+                created_at ${typeTimestamp},
+                FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE
             )
         `);
 
@@ -353,9 +355,27 @@ async function setupDb() {
                 consumable_id INTEGER,
                 used_percentage REAL DEFAULT 0,
                 cost_at_time REAL DEFAULT 0,
-                created_at ${typeTimestamp}
+                created_at ${typeTimestamp},
+                FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE
             )
         `);
+
+        // Migration : add FK constraints on existing PostgreSQL tables (idempotent)
+        if (!IS_LOCAL) {
+            const fkMigrations = [
+                `DO $$ BEGIN ALTER TABLE images ADD CONSTRAINT fk_images_bag_id FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+                `DO $$ BEGIN ALTER TABLE bag_logs ADD CONSTRAINT fk_bag_logs_bag_id FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+                `DO $$ BEGIN ALTER TABLE bag_consumables ADD CONSTRAINT fk_bag_consumables_bag_id FOREIGN KEY (bag_id) REFERENCES bags(id) ON DELETE CASCADE; EXCEPTION WHEN duplicate_object THEN NULL; END $$`,
+            ];
+            for (const sql of fkMigrations) {
+                try { await db.query(sql); } catch (e) { /* ignore */ }
+            }
+        }
+
+        // Cleanup orphaned rows (belt-and-suspenders for existing data in production)
+        await query('DELETE FROM images WHERE bag_id NOT IN (SELECT id FROM bags)');
+        await query('DELETE FROM bag_logs WHERE bag_id NOT IN (SELECT id FROM bags)');
+        await query('DELETE FROM bag_consumables WHERE bag_id NOT IN (SELECT id FROM bags)');
 
         await query('CREATE INDEX IF NOT EXISTS idx_images_bag_id ON images(bag_id)');
         await query('CREATE INDEX IF NOT EXISTS idx_bag_logs_bag_id ON bag_logs(bag_id)');
@@ -541,7 +561,9 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
             await deleteImage(img);
         }
 
-        // Explicit delete for PostgreSQL (no ON DELETE CASCADE on images table)
+        // Explicit cleanup for all child tables (belt-and-suspenders alongside FK CASCADE)
+        await query('DELETE FROM bag_logs WHERE bag_id = ?', [id]);
+        await query('DELETE FROM bag_consumables WHERE bag_id = ?', [id]);
         await query('DELETE FROM images WHERE bag_id = ?', [id]);
         await query('DELETE FROM bags WHERE id = ?', [id]);
 
