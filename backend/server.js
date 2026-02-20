@@ -63,7 +63,7 @@ app.use(cors({
     origin: function (origin, callback) {
         if (!origin) return callback(null, true);
         const allowed = getAllowedOrigins();
-        const isAllowed = allowed.some(o => origin.startsWith(o));
+        const isAllowed = allowed.some(o => origin === o);
 
         if (process.env.FRONTEND_URL === '*' || isAllowed) {
             callback(null, true);
@@ -96,7 +96,13 @@ if (IS_LOCAL) {
 const storage = multer.memoryStorage();
 const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 }
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        allowed.includes(file.mimetype)
+            ? cb(null, true)
+            : cb(new Error('Type de fichier non autorisé. Utilisez JPEG, PNG, WebP ou GIF.'));
+    }
 });
 
 // --- Database Abstraction Layer ---
@@ -385,7 +391,7 @@ async function setupDb() {
         await query('CREATE INDEX IF NOT EXISTS idx_bags_brand ON bags(brand)');
 
         const brandsCount = await query('SELECT COUNT(*) as count FROM brands');
-        const count = IS_LOCAL ? brandsCount.rows[0].count : brandsCount.rows[0].count;
+        const count = brandsCount.rows[0].count;
         if (parseInt(count) === 0) {
             const defaultBrands = ['Hermès', 'Louis Vuitton', 'Chanel', 'Dior', 'Gucci', 'Prada', 'Celine', 'Saint Laurent', 'Fendi', 'Balenciaga'];
             for (const brand of defaultBrands) {
@@ -396,7 +402,7 @@ async function setupDb() {
         }
 
         const typesCount = await query('SELECT COUNT(*) as count FROM item_types');
-        const tCount = IS_LOCAL ? typesCount.rows[0].count : typesCount.rows[0].count;
+        const tCount = typesCount.rows[0].count;
         if (parseInt(tCount) === 0) {
             const defaultTypes = ['Sac', 'Chaussures', 'Petite Maroquinerie', 'Vêtements', 'Accessoires', 'Autre'];
             for (const t of defaultTypes) {
@@ -406,7 +412,7 @@ async function setupDb() {
             }
         }
 
-        const adminUser = await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
+        await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
         const admins = await query('SELECT * FROM users WHERE username = ?', ['admin']);
         if (admins.rows.length === 0) {
             const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
@@ -450,6 +456,20 @@ const loginLimiter = rateLimit({
     message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
 });
 
+const apiLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    message: { error: 'Trop de requêtes, réessayez dans une minute' }
+});
+
+const uploadLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    message: { error: "Trop d'uploads, réessayez dans une minute" }
+});
+
+app.use('/api/', apiLimiter);
+
 app.post('/api/login', loginLimiter, async (req, res) => {
     try {
         const { password } = req.body;
@@ -470,6 +490,9 @@ app.post('/api/login', loginLimiter, async (req, res) => {
 app.post('/api/change-password', auth, async (req, res) => {
     try {
         const { currentPassword, newPassword } = req.body;
+        if (!newPassword || newPassword.length < 8) {
+            return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
+        }
         const result = await query('SELECT * FROM users WHERE id = ?', [req.user.id]);
         const user = result.rows[0];
 
@@ -579,7 +602,8 @@ app.get('/api/bags/:id/logs', auth, async (req, res) => {
         const result = await query('SELECT * FROM bag_logs WHERE bag_id = ? ORDER BY date DESC, created_at DESC', [req.params.id]);
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -593,7 +617,8 @@ app.post('/api/bags/:id/logs', auth, async (req, res) => {
         const newLog = await query('SELECT * FROM bag_logs WHERE id = ?', [id]);
         res.json(newLog.rows[0]);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -602,7 +627,8 @@ app.delete('/api/logs/:id', auth, async (req, res) => {
         await query('DELETE FROM bag_logs WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -618,7 +644,8 @@ app.get('/api/bags/:id/consumables', auth, async (req, res) => {
         const result = await query(sql, [req.params.id]);
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -631,16 +658,24 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
         const consumable = cResult.rows[0];
         if (!consumable) return res.status(404).json({ error: 'Consumable not found' });
 
-        const cost = (consumable.purchase_price || 0) * (usage_percent / 100);
+        const usagePct = parseFloat(usage_percent) || 0;
+        if (usagePct <= 0 || usagePct > 100) {
+            return res.status(400).json({ error: "Le pourcentage d'utilisation doit être entre 1 et 100" });
+        }
+        if (usagePct > consumable.remaining_percentage) {
+            return res.status(400).json({ error: 'Stock insuffisant' });
+        }
+
+        const cost = (consumable.purchase_price || 0) * (usagePct / 100);
 
         await withTransaction(async (txQuery) => {
             await txQuery(
                 'INSERT INTO bag_consumables (bag_id, consumable_id, used_percentage, cost_at_time) VALUES (?, ?, ?, ?)',
-                [bag_id, consumable_id, usage_percent, cost]
+                [bag_id, consumable_id, usagePct, cost]
             );
             await txQuery(
                 'UPDATE consumables SET remaining_percentage = remaining_percentage - ? WHERE id = ?',
-                [usage_percent, consumable_id]
+                [usagePct, consumable_id]
             );
             await txQuery(
                 'UPDATE bags SET material_costs = material_costs + ? WHERE id = ?',
@@ -651,7 +686,8 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
         res.json({ success: true, cost_added: cost });
 
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -678,7 +714,8 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
         res.json({ success: true });
 
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
     }
 });
 
@@ -713,7 +750,12 @@ app.delete('/api/images/:id', auth, async (req, res) => {
     }
 });
 
-app.post('/api/upload', auth, upload.single('image'), async (req, res) => {
+app.post('/api/upload', auth, uploadLimiter, (req, res, next) => {
+    upload.single('image')(req, res, (err) => {
+        if (err) return res.status(400).json({ error: err.message });
+        next();
+    });
+}, async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: 'No file uploaded' });
     }
@@ -730,7 +772,11 @@ app.post('/api/upload', auth, upload.single('image'), async (req, res) => {
 app.get('/api/dashboard-lists', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM dashboard_lists ORDER BY order_index ASC');
-        res.json(result.rows.map(l => ({ ...l, filters: JSON.parse(l.filters || '[]') })));
+        res.json(result.rows.map(l => {
+            let filters = [];
+            try { filters = JSON.parse(l.filters || '[]'); } catch {}
+            return { ...l, filters };
+        }));
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch dashboard lists' });
     }
