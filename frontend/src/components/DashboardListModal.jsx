@@ -1,15 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { X, Trash2 } from 'lucide-react'
-
-const STATUSES = {
-    to_be_cleaned: { label: 'À nettoyer' },
-    cleaning: { label: 'Nettoyage' },
-    repairing: { label: 'Réparation' },
-    drying: { label: 'Séchage' },
-    ready_for_sale: { label: 'Prêt à la vente' },
-    selling: { label: 'En vente' },
-    sold: { label: 'Vendu' }
-}
+import { STATUSES } from '../constants'
 
 function DashboardListModal({
     show,

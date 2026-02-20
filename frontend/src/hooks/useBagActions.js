@@ -94,7 +94,7 @@ export const useBagActions = (authenticatedFetch, onSuccess) => {
                             body: JSON.stringify({ url: img.url, type: img.type || 'other', public_id: img.public_id })
                         })
                     ));
-                    toast.success('Nouveau sac ajouté !');
+                    toast.success('Nouvel article ajouté !');
                 } else {
                     toast.success('Modifications enregistrées');
                 }
@@ -110,13 +110,13 @@ export const useBagActions = (authenticatedFetch, onSuccess) => {
     }, [authenticatedFetch, onSuccess]);
 
     const handleDelete = useCallback(async (id, closeModal) => {
-        if (!confirm('Supprimer ce sac ?')) return;
+        if (!confirm('Supprimer cet article ?')) return;
         try {
             const resp = await authenticatedFetch(`/api/bags/${id}`, { method: 'DELETE' });
             if (resp.ok) {
                 onSuccess();
                 closeModal();
-                toast.success('Sac supprimé définitivement');
+                toast.success('Article supprimé définitivement');
             } else {
                 toast.error('Erreur lors de la suppression');
             }
