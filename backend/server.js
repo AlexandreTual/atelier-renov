@@ -924,6 +924,58 @@ app.post('/api/brands', auth, async (req, res) => {
     }
 });
 
+app.put('/api/brands/:id', auth, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name required' });
+        await query('UPDATE brands SET name = ? WHERE id = ?', [name, req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update brand' });
+    }
+});
+
+app.delete('/api/brands/:id', auth, async (req, res) => {
+    try {
+        await query('DELETE FROM brands WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete brand' });
+    }
+});
+
+app.put('/api/item-types/:id', auth, async (req, res) => {
+    try {
+        const { name } = req.body;
+        if (!name) return res.status(400).json({ error: 'Name required' });
+        await query('UPDATE item_types SET name = ? WHERE id = ?', [name, req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to update item type' });
+    }
+});
+
+app.delete('/api/item-types/:id', auth, async (req, res) => {
+    try {
+        await query('DELETE FROM item_types WHERE id = ?', [req.params.id]);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to delete item type' });
+    }
+});
+
+app.get('/api/bags/:id', auth, async (req, res) => {
+    try {
+        const bagResult = await query('SELECT * FROM bags WHERE id = ?', [req.params.id]);
+        if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Bag not found' });
+        const bag = bagResult.rows[0];
+        const imagesResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
+        res.json({ ...bag, images: imagesResult.rows });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch bag' });
+    }
+});
+
 async function start() {
     await setupDb();
     app.listen(PORT, () => {
