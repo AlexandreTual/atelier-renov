@@ -12,6 +12,7 @@ import ConsumablesTab from './components/ConsumablesTab'
 import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
 import { Toaster } from 'react-hot-toast'
+import { STATUSES } from './constants'
 
 // Hooks
 import { useAuth } from './hooks/useAuth'
@@ -25,7 +26,8 @@ function App() {
   const { token, authenticatedFetch, login, logout } = useAuth()
   const {
     bags, dashboardLists, setDashboardLists, consumables, expenses, brands, itemTypes,
-    fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands, fetchItemTypes, fetchAll
+    fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands, fetchItemTypes, fetchAll,
+    isLoading
   } = useProjectData(authenticatedFetch)
 
   // UI state
@@ -38,6 +40,9 @@ function App() {
   })
   const [searchTerm, setSearchTerm] = useState('')
   const [brandFilter, setBrandFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState('all')
+  const [itemTypeFilter, setItemTypeFilter] = useState('all')
+  const [sortBy, setSortBy] = useState('date_desc')
   const [showListModal, setShowListModal] = useState(false)
   const [selectedList, setSelectedList] = useState(null)
 
@@ -164,7 +169,7 @@ function App() {
                           <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />
                         ))}
                         {filteredBags.length === 0 && (
-                          <p style={{ color: '#999', fontStyle: 'italic', gridColumn: '1 / -1' }}>Aucun sac ne correspond à ces critères.</p>
+                          <p style={{ color: '#999', fontStyle: 'italic', gridColumn: '1 / -1' }}>Aucun article ne correspond à ces critères.</p>
                         )}
                       </div>
                     </div>
@@ -176,39 +181,69 @@ function App() {
 
           <Route path="/inventory" element={
             <section>
-              <div style={{ marginBottom: '2rem', display: 'flex', gap: '1rem' }}>
+              <div style={{ marginBottom: '1rem', display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <input
                   type="text"
                   placeholder="Rechercher un modèle ou une marque..."
                   className="search-input"
                   value={searchTerm}
                   onChange={e => setSearchTerm(e.target.value)}
-                  style={{ flex: 1, padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none' }}
+                  style={{ flex: 1, minWidth: '200px', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none' }}
                 />
-                <select
-                  value={brandFilter}
-                  onChange={e => setBrandFilter(e.target.value)}
-                  style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'white', cursor: 'pointer', minWidth: '150px' }}
-                >
+                <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'white', cursor: 'pointer' }}>
                   <option value="all">Toutes les marques</option>
-                  {brands.map(b => (
-                    <option key={b.id} value={b.name}>{b.name}</option>
-                  ))}
+                  {brands.map(b => <option key={b.id} value={b.name}>{b.name}</option>)}
+                </select>
+                <select value={itemTypeFilter} onChange={e => setItemTypeFilter(e.target.value)} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'white', cursor: 'pointer' }}>
+                  <option value="all">Tous les types</option>
+                  {itemTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                </select>
+                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'white', cursor: 'pointer' }}>
+                  <option value="all">Tous les statuts</option>
+                  {Object.entries(STATUSES).map(([key, val]) => <option key={key} value={key}>{val.label}</option>)}
+                </select>
+                <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', background: 'white', cursor: 'pointer' }}>
+                  <option value="date_desc">Plus récent</option>
+                  <option value="date_asc">Plus ancien</option>
+                  <option value="brand">Marque A→Z</option>
+                  <option value="price_asc">Prix ↑</option>
+                  <option value="price_desc">Prix ↓</option>
                 </select>
               </div>
-              <div className="inventory-grid">
-                {bags
+              {isLoading ? (
+                <div style={{ textAlign: 'center', padding: '4rem', color: '#999' }}>Chargement...</div>
+              ) : (() => {
+                const filtered = bags
                   .filter(bag => {
                     const matchSearch = bag.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                       (bag.brand && bag.brand.toLowerCase().includes(searchTerm.toLowerCase()));
                     const matchBrand = brandFilter === 'all' || bag.brand === brandFilter;
-                    return matchSearch && matchBrand;
+                    const matchStatus = statusFilter === 'all' || bag.status === statusFilter;
+                    const matchType = itemTypeFilter === 'all' || bag.item_type === itemTypeFilter;
+                    return matchSearch && matchBrand && matchStatus && matchType;
                   })
-                  .map(bag => (
-                    <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />
-                  ))
-                }
-              </div>
+                  .sort((a, b) => {
+                    if (sortBy === 'brand') return (a.brand || '').localeCompare(b.brand || '');
+                    if (sortBy === 'price_asc') return (a.purchase_price || 0) - (b.purchase_price || 0);
+                    if (sortBy === 'price_desc') return (b.purchase_price || 0) - (a.purchase_price || 0);
+                    if (sortBy === 'date_asc') return new Date(a.created_at) - new Date(b.created_at);
+                    return new Date(b.created_at) - new Date(a.created_at); // date_desc default
+                  });
+                return filtered.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
+                    <p>{bags.length === 0 ? 'Aucun article dans l\'inventaire.' : 'Aucun article ne correspond aux filtres sélectionnés.'}</p>
+                    {bags.length === 0 && (
+                      <button onClick={() => openModal()} style={{ marginTop: '1rem', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                        Ajouter mon premier article
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="inventory-grid">
+                    {filtered.map(bag => <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />)}
+                  </div>
+                );
+              })()}
             </section>
           } />
 
