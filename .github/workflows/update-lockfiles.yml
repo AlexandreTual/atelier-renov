@@ -1,0 +1,30 @@
+name: Update lock files
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Regenerate backend/package-lock.json
+        run: npm install
+        working-directory: backend
+      - name: Regenerate frontend/package-lock.json
+        run: npm install
+        working-directory: frontend
+      - name: Commit updated lock files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add backend/package-lock.json frontend/package-lock.json
+          git diff --cached --quiet || git commit -m "chore: regenerate lock files with new devDependencies"
+          git push
