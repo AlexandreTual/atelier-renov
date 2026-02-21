@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react'
-import { Plus, Trash2, Edit2, Package } from 'lucide-react'
+import { Plus, Trash2, Edit2, Package, AlertTriangle } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+
+const LOW_STOCK_THRESHOLD = 20
 
 function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
@@ -74,6 +76,8 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
         }
     }
 
+    const lowStockItems = consumables.filter(c => c.remaining_percentage < LOW_STOCK_THRESHOLD)
+
     return (
         <section>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
@@ -85,12 +89,51 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
                 </button>
             </div>
 
+            {lowStockItems.length > 0 && (
+                <div style={{
+                    background: '#fff8e1',
+                    border: '1px solid #f59e0b',
+                    borderRadius: '8px',
+                    padding: '0.75rem 1rem',
+                    marginBottom: '1.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    flexWrap: 'wrap'
+                }}>
+                    <AlertTriangle size={18} color="#f59e0b" style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: '600', color: '#92400e', fontSize: '0.9rem' }}>
+                        Stock faible :
+                    </span>
+                    <span style={{ color: '#92400e', fontSize: '0.9rem' }}>
+                        {lowStockItems.map(c => `${c.name} (${c.remaining_percentage}%)`).join(' · ')}
+                    </span>
+                </div>
+            )}
+
             <div className="inventory-grid">
                 {consumables.map(item => (
-                    <div key={item.id} className="bag-card" style={{ padding: '1rem' }}>
+                    <div key={item.id} className="bag-card" style={{ padding: '1rem', outline: item.remaining_percentage < LOW_STOCK_THRESHOLD ? '2px solid #f59e0b' : 'none' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                             <div>
-                                <h3 style={{ margin: 0 }}>{item.name}</h3>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                    <h3 style={{ margin: 0 }}>{item.name}</h3>
+                                    {item.remaining_percentage < LOW_STOCK_THRESHOLD && (
+                                        <span style={{
+                                            fontSize: '0.7rem',
+                                            fontWeight: '700',
+                                            background: '#fef3c7',
+                                            color: '#92400e',
+                                            padding: '2px 6px',
+                                            borderRadius: '4px',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '3px'
+                                        }}>
+                                            <AlertTriangle size={10} /> Stock faible
+                                        </span>
+                                    )}
+                                </div>
                                 <p style={{ color: '#666', fontSize: '0.9rem', margin: '0.25rem 0' }}>{item.brand}</p>
                             </div>
                             <div style={{ display: 'flex', gap: '0.5rem' }}>

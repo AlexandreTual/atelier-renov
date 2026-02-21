@@ -8,6 +8,9 @@ function BagCard({ bag, onClick }) {
     ? ((bag.actual_resale_price || 0) - (bag.purchase_price || 0) - (bag.fees || 0) - (bag.material_costs || 0))
     : ((bag.target_resale_price || 0) - (bag.purchase_price || 0) - (bag.material_costs || 0))
 
+  const costBase = (bag.purchase_price || 0) + (bag.material_costs || 0)
+  const marginPct = costBase > 0 ? (profit / costBase * 100) : null
+
   const mainImage = bag.images && bag.images.length > 0 ? bag.images[0].url : null
 
   return (
@@ -52,6 +55,11 @@ function BagCard({ bag, onClick }) {
             <div style={{ fontWeight: '700', color: profit >= 0 ? 'var(--accent-green)' : '#e74c3c' }}>
               {profit >= 0 ? '+' : ''}{profit.toFixed(2)} €
             </div>
+            {marginPct !== null && (
+              <div style={{ fontSize: '0.7rem', color: marginPct >= 0 ? 'var(--accent-green)' : '#e74c3c' }}>
+                {marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)} %
+              </div>
+            )}
           </div>
         </div>
         <div className="bag-prices">
