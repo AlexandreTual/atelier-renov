@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { Plus, Trash2, Download, Calculator, TrendingUp, TrendingDown } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import StatCard from './StatCard'
+import PerformanceChart from './PerformanceChart'
 
 function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
@@ -151,6 +152,8 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
                     </table>
                 </div>
             </div>
+
+            <PerformanceChart authenticatedFetch={authenticatedFetch} />
 
             {showModal && (
                 <div className="modal-overlay" onClick={() => setShowModal(false)}>
