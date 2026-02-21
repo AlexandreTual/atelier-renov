@@ -923,6 +923,66 @@ app.delete('/api/expenses/:id', auth, async (req, res) => {
     }
 });
 
+app.get('/api/stats/monthly', auth, async (req, res) => {
+    try {
+        const salesSql = IS_LOCAL
+            ? `SELECT substr(sale_date, 1, 7) as month,
+                 COUNT(*) as count,
+                 ROUND(SUM(actual_resale_price), 2) as revenue,
+                 ROUND(SUM(actual_resale_price - purchase_price - fees - material_costs), 2) as profit
+               FROM bags
+               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != ''
+               GROUP BY substr(sale_date, 1, 7)
+               ORDER BY month ASC`
+            : `SELECT substring(sale_date, 1, 7) as month,
+                 COUNT(*) as count,
+                 ROUND(SUM(actual_resale_price)::numeric, 2) as revenue,
+                 ROUND(SUM(actual_resale_price - purchase_price - fees - material_costs)::numeric, 2) as profit
+               FROM bags
+               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != ''
+               GROUP BY substring(sale_date, 1, 7)
+               ORDER BY month ASC`;
+
+        const expensesSql = IS_LOCAL
+            ? `SELECT substr(date, 1, 7) as month, ROUND(SUM(amount), 2) as expenses
+               FROM expenses WHERE date IS NOT NULL AND date != ''
+               GROUP BY substr(date, 1, 7)
+               ORDER BY month ASC`
+            : `SELECT substring(date, 1, 7) as month, ROUND(SUM(amount)::numeric, 2) as expenses
+               FROM expenses WHERE date IS NOT NULL AND date != ''
+               GROUP BY substring(date, 1, 7)
+               ORDER BY month ASC`;
+
+        const [salesResult, expensesResult] = await Promise.all([
+            query(salesSql),
+            query(expensesSql)
+        ]);
+
+        const months = new Map();
+        for (const row of salesResult.rows) {
+            months.set(row.month, {
+                month: row.month,
+                revenue: parseFloat(row.revenue) || 0,
+                profit: parseFloat(row.profit) || 0,
+                count: parseInt(row.count) || 0,
+                expenses: 0
+            });
+        }
+        for (const row of expensesResult.rows) {
+            if (months.has(row.month)) {
+                months.get(row.month).expenses = parseFloat(row.expenses) || 0;
+            } else {
+                months.set(row.month, { month: row.month, revenue: 0, profit: 0, count: 0, expenses: parseFloat(row.expenses) || 0 });
+            }
+        }
+
+        res.json(Array.from(months.values()).sort((a, b) => a.month.localeCompare(b.month)));
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 app.get('/api/export/csv', auth, async (req, res) => {
     try {
         const bagsRes = await query('SELECT * FROM bags WHERE status = ?', ['sold']);
