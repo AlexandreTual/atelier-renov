@@ -256,6 +256,34 @@ function BagModal({
                         </div>
                     </div>
 
+                    {(() => {
+                        const purchase = parseFloat(formData.purchase_price) || 0
+                        const target = parseFloat(formData.target_resale_price) || 0
+                        const material = parseFloat(formData.material_costs) || 0
+                        const fees = parseFloat(formData.fees) || 0
+                        const actual = parseFloat(formData.actual_resale_price) || 0
+                        const isSold = formData.status === 'sold'
+                        const profit = isSold
+                            ? actual - purchase - fees - material
+                            : target - purchase - material
+                        const costBase = purchase + material
+                        const marginPct = costBase > 0 ? (profit / costBase * 100) : null
+                        const color = profit >= 0 ? '#2ecc71' : '#e74c3c'
+                        return (
+                            <div style={{ background: profit >= 0 ? '#eafaf1' : '#fdedec', borderRadius: '8px', padding: '0.6rem 1rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '0.85rem', color: '#555' }}>{isSold ? 'Profit réel' : 'Profit estimé'}</span>
+                                <span style={{ fontWeight: '700', color, fontSize: '1rem' }}>
+                                    {profit >= 0 ? '+' : ''}{profit.toFixed(2)} €
+                                    {marginPct !== null && (
+                                        <span style={{ fontSize: '0.8rem', marginLeft: '0.5rem', opacity: 0.8 }}>
+                                            ({marginPct >= 0 ? '+' : ''}{marginPct.toFixed(0)} %)
+                                        </span>
+                                    )}
+                                </span>
+                            </div>
+                        )
+                    })()}
+
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', background: '#f9f9f9', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
                         <div className="form-group">
                             <label>Achat (€)</label>

@@ -38,13 +38,19 @@ function App() {
     actual_resale_price: 0, status: 'to_be_cleaned', fees: 0,
     material_costs: 0, notes: '', purchase_source: '', is_donation: 0, images: []
   })
-  const [searchTerm, setSearchTerm] = useState('')
-  const [brandFilter, setBrandFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
-  const [itemTypeFilter, setItemTypeFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('date_desc')
+  const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('inv_search') || '')
+  const [brandFilter, setBrandFilter] = useState(() => localStorage.getItem('inv_brand') || 'all')
+  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('inv_status') || 'all')
+  const [itemTypeFilter, setItemTypeFilter] = useState(() => localStorage.getItem('inv_type') || 'all')
+  const [sortBy, setSortBy] = useState(() => localStorage.getItem('inv_sort') || 'date_desc')
   const [showListModal, setShowListModal] = useState(false)
   const [selectedList, setSelectedList] = useState(null)
+
+  useEffect(() => { localStorage.setItem('inv_search', searchTerm) }, [searchTerm])
+  useEffect(() => { localStorage.setItem('inv_brand', brandFilter) }, [brandFilter])
+  useEffect(() => { localStorage.setItem('inv_status', statusFilter) }, [statusFilter])
+  useEffect(() => { localStorage.setItem('inv_type', itemTypeFilter) }, [itemTypeFilter])
+  useEffect(() => { localStorage.setItem('inv_sort', sortBy) }, [sortBy])
 
   // Actions
   const { handleImageAdd, handleImageDelete, handleSubmit, handleDelete } = useBagActions(authenticatedFetch, fetchBags)
