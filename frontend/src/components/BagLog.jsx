@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Trash2, Plus, History } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -10,7 +10,7 @@ function BagLog({ bagId, authenticatedFetch }) {
         date: new Date().toISOString().split('T')[0]
     });
 
-    const fetchLogs = async () => {
+    const fetchLogs = useCallback(async () => {
         setLoading(true);
         try {
             const resp = await authenticatedFetch(`/api/bags/${bagId}/logs`);
@@ -23,11 +23,11 @@ function BagLog({ bagId, authenticatedFetch }) {
         } finally {
             setLoading(false);
         }
-    };
+    }, [bagId, authenticatedFetch]);
 
     useEffect(() => {
         if (bagId) fetchLogs();
-    }, [bagId]);
+    }, [bagId, fetchLogs]);
 
     const handleAddLog = async () => {
         if (!newLog.action || !newLog.date) {

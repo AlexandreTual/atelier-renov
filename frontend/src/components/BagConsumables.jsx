@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Package, Trash2, Plus, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 
@@ -12,7 +12,7 @@ function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
     const [usagePercent, setUsagePercent] = useState(10); // Default 10%
 
     // Fetch available consumables for dropdown
-    const fetchAvailableConsumables = async () => {
+    const fetchAvailableConsumables = useCallback(async () => {
         try {
             const resp = await authenticatedFetch('/api/consumables');
             if (resp.ok) {
@@ -22,10 +22,10 @@ function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
         } catch (err) {
             console.error('Failed to fetch consumables', err);
         }
-    };
+    }, [authenticatedFetch]);
 
     // Fetch linked consumables
-    const fetchLinkedConsumables = async () => {
+    const fetchLinkedConsumables = useCallback(async () => {
         setLoading(true);
         try {
             const resp = await authenticatedFetch(`/api/bags/${bagId}/consumables`);
@@ -38,14 +38,14 @@ function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
         } finally {
             setLoading(false);
         }
-    };
+    }, [bagId, authenticatedFetch]);
 
     useEffect(() => {
         if (bagId) {
             fetchLinkedConsumables();
             fetchAvailableConsumables();
         }
-    }, [bagId]);
+    }, [bagId, fetchLinkedConsumables, fetchAvailableConsumables]);
 
     const handleAddConsumable = async () => {
         if (!selectedConsumableId) {
@@ -100,7 +100,7 @@ function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
     };
 
     // Helper to get selected consumable details for preview
-    const selectedConsumableDetails = availableConsumables.find(c => c.id == selectedConsumableId);
+    const selectedConsumableDetails = availableConsumables.find(c => c.id === Number(selectedConsumableId));
     const estimatedCost = selectedConsumableDetails
         ? (selectedConsumableDetails.purchase_price * (usagePercent / 100)).toFixed(2)
         : '0.00';

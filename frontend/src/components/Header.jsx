@@ -32,7 +32,7 @@ function Header({ onAddNew }) {
             {(location.pathname === '/inventory' || location.pathname === '/dashboard') && (
                 <button className="btn-primary" onClick={onAddNew}>
                     <Plus size={20} />
-                    Nouveau sac
+                    Nouvel article
                 </button>
             )}
         </header>

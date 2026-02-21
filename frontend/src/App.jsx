@@ -90,7 +90,7 @@ function App() {
   // Stats calculations
   const totalProfit = bags.reduce((acc, bag) => {
     if (bag.status === 'sold') {
-      return acc + (bag.actual_resale_price - bag.purchase_price - (bag.fees || 0) - (bag.material_costs || 0))
+      return acc + ((bag.actual_resale_price || 0) - (bag.purchase_price || 0) - (bag.fees || 0) - (bag.material_costs || 0))
     }
     return acc
   }, 0)
