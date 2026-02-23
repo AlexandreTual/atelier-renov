@@ -366,6 +366,9 @@ async function setupDb() {
             )
         `);
 
+        // Migration: add listing_url to bags (idempotent)
+        try { await query('ALTER TABLE bags ADD COLUMN listing_url TEXT'); } catch(e) { /* already exists */ }
+
         // Migration : add FK constraints on existing PostgreSQL tables (idempotent)
         if (!IS_LOCAL) {
             const fkMigrations = [
@@ -535,10 +538,10 @@ app.get('/api/bags', auth, async (req, res) => {
 
 app.post('/api/bags', auth, validateBag, async (req, res) => {
     try {
-        const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type } = req.body;
+        const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url } = req.body;
         const id = await insertAndGetId(
-            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac']
+            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', listing_url || null]
         );
         res.json({ id });
     } catch (err) {
@@ -553,7 +556,7 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
         const {
             name, brand, purchase_price, target_resale_price, actual_resale_price,
             status, purchase_date, sale_date, fees, material_costs, time_spent, notes,
-            purchase_source, is_donation, item_type
+            purchase_source, is_donation, item_type, listing_url
         } = req.body;
 
         const result = await query(
@@ -561,9 +564,9 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
                 name = ?, brand = ?, purchase_price = ?, target_resale_price = ?,
                 actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?,
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
-                purchase_source = ?, is_donation = ?, item_type = ?
+                purchase_source = ?, is_donation = ?, item_type = ?, listing_url = ?
             WHERE id = ?`,
-            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', id]
+            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', listing_url || null, id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Bag not found' });
         res.json({ success: true });

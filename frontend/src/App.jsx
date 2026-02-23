@@ -36,7 +36,7 @@ function App() {
   const [formData, setFormData] = useState({
     name: '', brand: '', item_type: '', purchase_price: 0, target_resale_price: 0,
     actual_resale_price: 0, status: 'to_be_cleaned', fees: 0,
-    material_costs: 0, notes: '', purchase_source: '', is_donation: 0, images: []
+    material_costs: 0, notes: '', purchase_source: '', is_donation: 0, listing_url: '', images: []
   })
   const [searchTerm, setSearchTerm] = useState(() => localStorage.getItem('inv_search') || '')
   const [brandFilter, setBrandFilter] = useState(() => localStorage.getItem('inv_brand') || 'all')
@@ -82,7 +82,7 @@ function App() {
       setFormData({
         name: '', brand: '', item_type: '', purchase_price: '', target_resale_price: '',
         actual_resale_price: '', status: 'to_be_cleaned', fees: '',
-        material_costs: '', notes: '', purchase_source: '', is_donation: 0, images: []
+        material_costs: '', notes: '', purchase_source: '', is_donation: 0, listing_url: '', images: []
       })
     }
     setShowModal(true)

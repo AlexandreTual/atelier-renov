@@ -1,5 +1,5 @@
 import React from 'react'
-import { ImageIcon } from 'lucide-react'
+import { ImageIcon, ExternalLink } from 'lucide-react'
 import { STATUSES } from '../constants'
 
 function BagCard({ bag, onClick }) {
@@ -62,6 +62,17 @@ function BagCard({ bag, onClick }) {
             )}
           </div>
         </div>
+        {bag.listing_url && (
+          <a
+            href={bag.listing_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontSize: '0.75rem', color: '#0369a1', textDecoration: 'none', marginBottom: '0.5rem' }}
+          >
+            <ExternalLink size={12} /> Voir l'annonce
+          </a>
+        )}
         <div className="bag-prices">
           <div className="price-item">
             <span className="price-label">Achat</span>
