@@ -375,6 +375,7 @@ async function setupDb() {
         try { await query(`ALTER TABLE consumables ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
         try { await query(`ALTER TABLE expenses ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
 
+
         // Migration : add FK constraints on existing PostgreSQL tables (idempotent)
         if (!IS_LOCAL) {
             const fkMigrations = [
