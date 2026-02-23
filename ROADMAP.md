@@ -93,6 +93,54 @@
 - [ ] **Recherche Avancée** : plage de prix, date, rentabilité
 - [ ] **Mode Sombre**
 
+### SaaS — Comptes & Multi-tenancy (priorité critique)
+- [ ] **Système de comptes** : remplacer l'admin unique par une table `users` multi-comptes (email + password hashé)
+- [ ] **Colonne `user_id`** sur toutes les tables de données (bags, expenses, consumables, brands, item_types, dashboard_lists, images, bag_logs, bag_consumables)
+- [ ] **Filtrage par `user_id`** sur tous les endpoints `/api/*` (extrait du JWT)
+- [ ] **Route `POST /api/register`** avec validation email + force mot de passe
+- [ ] **Script de migration DB** : ajout colonne `user_id` + backfill `user_id = 1` pour les données existantes
+- [ ] **Row-level security** (PostgreSQL) : isolation stricte des données entre tenants
+- [ ] **Quotas par utilisateur** : limite nb articles, stockage images (selon plan)
+
+### SaaS — Authentification renforcée
+- [ ] **Vérification email** à l'inscription (token envoyé par email, expiration 24h)
+- [ ] **Flux "mot de passe oublié"** : lien de reset par email avec token temporaire
+- [ ] **2FA TOTP** (optionnel) : Google Authenticator / Authy
+- [ ] **Refresh tokens** : JWT courte durée + refresh token stocké en base
+
+### SaaS — Monétisation
+- [ ] **Plans tarifaires** : Free (limites strictes) / Pro / Business
+  - Limites Free : ex. 20 articles, 1 Go images, pas d'export CSV
+  - Limites Pro : illimité articles, 10 Go images, toutes fonctionnalités
+- [ ] **Intégration Stripe** : paiement récurrent (mensuel/annuel), gestion abonnements, webhooks (paiement échoué, annulation)
+- [ ] **Période d'essai** : ex. 14 jours Pro gratuit sans CB
+- [ ] **Middleware de plan** : bloquer les endpoints dépassant les quotas du plan actif
+
+### SaaS — Onboarding
+- [ ] **Page de bienvenue** au premier login (checklist : ajouter un article, une marque, une dépense)
+- [ ] **Données d'exemple** (optionnel au signup) pour comprendre l'outil rapidement
+- [ ] **Email de bienvenue** transactionnel (SendGrid / Resend)
+- [ ] **Tooltip / guide contextuel** sur les premières actions clés
+
+### SaaS — Emails transactionnels
+- [ ] Welcome à l'inscription
+- [ ] Vérification email
+- [ ] Reset mot de passe
+- [ ] Fin de période d'essai (J-3, J-1)
+- [ ] Échec de paiement Stripe
+- [ ] Alerte stock bas (option notification email en plus du bandeau in-app)
+
+### SaaS — Back-office super-admin
+- [ ] **Dashboard admin** : liste des comptes, statut abonnement, usage (articles, stockage)
+- [ ] **MRR / churn** : métriques revenus récurrents
+- [ ] **Gestion des comptes** : suspendre, supprimer, changer de plan manuellement
+
+### SaaS — Légal & RGPD
+- [ ] **CGU / Politique de confidentialité** (page dédiée + acceptation au signup)
+- [ ] **Export des données** : endpoint `GET /api/account/export` (JSON de toutes les données de l'utilisateur)
+- [ ] **Suppression de compte** : cascade sur toutes les données + suppression images Cloudinary
+- [ ] **Bannière cookies** si tracking/analytics activé
+- [ ] **Mentions légales** (hébergeur, éditeur, contact DPO)
+
 ### Scalabilité
 - [ ] **Pagination** sur GET /api/bags (performance avec 500+ articles)
-- [ ] **Multi-utilisateurs** : plusieurs artisans sur le même inventaire
