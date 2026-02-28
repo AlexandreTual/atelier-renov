@@ -6,6 +6,7 @@ import Header from './components/Header'
 import StatCard from './components/StatCard'
 import BagCard from './components/BagCard'
 import SkeletonCard from './components/SkeletonCard'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import BagModal from './components/BagModal'
 import Login from './components/Login'
 import DashboardListModal from './components/DashboardListModal'
@@ -14,6 +15,9 @@ import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
 import { Toaster } from 'react-hot-toast'
 import { STATUSES } from './constants'
+import { calculateProfit } from './utils/finance'
+
+const PAGE_SIZE = 50
 
 // Hooks
 import { useAuth } from './hooks/useAuth'
@@ -44,14 +48,15 @@ function App() {
   const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('inv_status') || 'all')
   const [itemTypeFilter, setItemTypeFilter] = useState(() => localStorage.getItem('inv_type') || 'all')
   const [sortBy, setSortBy] = useState(() => localStorage.getItem('inv_sort') || 'date_desc')
+  const [inventoryPage, setInventoryPage] = useState(0)
   const [showListModal, setShowListModal] = useState(false)
   const [selectedList, setSelectedList] = useState(null)
 
-  useEffect(() => { localStorage.setItem('inv_search', searchTerm) }, [searchTerm])
-  useEffect(() => { localStorage.setItem('inv_brand', brandFilter) }, [brandFilter])
-  useEffect(() => { localStorage.setItem('inv_status', statusFilter) }, [statusFilter])
-  useEffect(() => { localStorage.setItem('inv_type', itemTypeFilter) }, [itemTypeFilter])
-  useEffect(() => { localStorage.setItem('inv_sort', sortBy) }, [sortBy])
+  useEffect(() => { localStorage.setItem('inv_search', searchTerm); setInventoryPage(0) }, [searchTerm])
+  useEffect(() => { localStorage.setItem('inv_brand', brandFilter); setInventoryPage(0) }, [brandFilter])
+  useEffect(() => { localStorage.setItem('inv_status', statusFilter); setInventoryPage(0) }, [statusFilter])
+  useEffect(() => { localStorage.setItem('inv_type', itemTypeFilter); setInventoryPage(0) }, [itemTypeFilter])
+  useEffect(() => { localStorage.setItem('inv_sort', sortBy); setInventoryPage(0) }, [sortBy])
 
   // Actions
   const { handleImageAdd, handleImageDelete, handleSubmit, handleDelete } = useBagActions(authenticatedFetch, fetchBags)
@@ -83,7 +88,7 @@ function App() {
       setFormData({
         name: '', brand: '', item_type: '', purchase_price: '', target_resale_price: '',
         actual_resale_price: '', status: 'to_be_cleaned', fees: '',
-        material_costs: '', notes: '', purchase_source: '', is_donation: 0, listing_url: '', images: []
+        material_costs: '', time_spent: '', notes: '', purchase_source: '', is_donation: 0, listing_url: '', images: []
       })
     }
     setShowModal(true)
@@ -95,12 +100,7 @@ function App() {
   }
 
   // Stats calculations
-  const totalProfit = bags.reduce((acc, bag) => {
-    if (bag.status === 'sold') {
-      return acc + ((bag.actual_resale_price || 0) - (bag.purchase_price || 0) - (bag.fees || 0) - (bag.material_costs || 0))
-    }
-    return acc
-  }, 0)
+  const totalProfit = bags.reduce((acc, bag) => bag.status === 'sold' ? acc + calculateProfit(bag) : acc, 0)
 
   const activeRenovations = bags.filter(b => ['cleaning', 'repairing', 'drying'].includes(b.status)).length
   const stockValueEst = bags.filter(b => b.status !== 'sold').reduce((acc, b) => acc + (b.target_resale_price || 0), 0)
@@ -113,6 +113,7 @@ function App() {
   return (
     <div className="app-container">
       <Toaster position="top-right" />
+      <ConfirmDialog />
       <Sidebar onLogout={logout} />
 
       <main className="main-content">
@@ -266,9 +267,42 @@ function App() {
                     )}
                   </div>
                 ) : (
-                  <div className="inventory-grid">
-                    {filtered.map(bag => <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />)}
-                  </div>
+                  <>
+                    {(searchTerm || brandFilter !== 'all' || statusFilter !== 'all' || itemTypeFilter !== 'all') && (
+                      <div style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
+                        {filtered.length} article{filtered.length !== 1 ? 's' : ''} trouvé{filtered.length !== 1 ? 's' : ''}
+                      </div>
+                    )}
+                    <div className="inventory-grid">
+                      {filtered.slice(inventoryPage * PAGE_SIZE, (inventoryPage + 1) * PAGE_SIZE).map(bag => (
+                        <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />
+                      ))}
+                    </div>
+                    {filtered.length > PAGE_SIZE && (
+                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' }}>
+                        <button
+                          onClick={() => setInventoryPage(p => p - 1)}
+                          disabled={inventoryPage === 0}
+                          className="btn-secondary"
+                          style={{ padding: '0.5rem 1.25rem' }}
+                        >
+                          ← Précédent
+                        </button>
+                        <span style={{ color: '#666', fontSize: '0.9rem' }}>
+                          Page {inventoryPage + 1} / {Math.ceil(filtered.length / PAGE_SIZE)}
+                          <span style={{ marginLeft: '0.5rem', color: '#aaa' }}>({filtered.length} articles)</span>
+                        </span>
+                        <button
+                          onClick={() => setInventoryPage(p => p + 1)}
+                          disabled={(inventoryPage + 1) * PAGE_SIZE >= filtered.length}
+                          className="btn-secondary"
+                          style={{ padding: '0.5rem 1.25rem' }}
+                        >
+                          Suivant →
+                        </button>
+                      </div>
+                    )}
+                  </>
                 );
               })()}
             </section>

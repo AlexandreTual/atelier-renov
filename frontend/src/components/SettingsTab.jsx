@@ -17,8 +17,8 @@ function SettingsTab({ authenticatedFetch }) {
             return toast.error('Les nouveaux mots de passe ne correspondent pas');
         }
 
-        if (passwordData.newPassword.length < 4) {
-            return toast.error('Le nouveau mot de passe est trop court');
+        if (passwordData.newPassword.length < 8) {
+            return toast.error('Le mot de passe doit contenir au moins 8 caractères');
         }
 
         setIsLoading(true);

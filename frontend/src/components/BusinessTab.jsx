@@ -3,9 +3,13 @@ import { Plus, Trash2, Download, Calculator, TrendingUp, TrendingDown } from 'lu
 import { toast } from 'react-hot-toast'
 import StatCard from './StatCard'
 import PerformanceChart from './PerformanceChart'
+import { calculateProfit } from '../utils/finance'
+import { confirm } from './ConfirmDialog'
 
 function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
+    const [exporting, setExporting] = useState(false)
+    const [expenseSort, setExpenseSort] = useState('date_desc')
     const [formData, setFormData] = useState({
         description: '',
         amount: 0,
@@ -36,7 +40,7 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     }
 
     const handleDelete = async (id) => {
-        if (!confirm('Supprimer cette dépense ?')) return
+        if (!await confirm('Supprimer cette dépense ?')) return
         try {
             const resp = await authenticatedFetch(`/api/expenses/${id}`, { method: 'DELETE' })
             if (resp.ok) {
@@ -52,6 +56,8 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     }
 
     const exportCSV = async () => {
+        if (exporting) return
+        setExporting(true)
         const loadingToast = toast.loading('Export en cours...')
         try {
             const resp = await authenticatedFetch('/api/export/csv')
@@ -72,14 +78,22 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
         } catch (err) {
             console.error('Failed to export CSV', err)
             toast.error('Échec de l\'export', { id: loadingToast })
+        } finally {
+            setExporting(false)
         }
     }
 
     // Calculations
-    const totalSales = bags.reduce((acc, b) => b.status === 'sold' ? acc + b.actual_resale_price : acc, 0)
-    const bagCosts = bags.reduce((acc, b) => b.status === 'sold' ? acc + b.purchase_price + (b.fees || 0) + (b.material_costs || 0) : acc, 0)
+    const totalSales = bags.reduce((acc, b) => b.status === 'sold' ? acc + (parseFloat(b.actual_resale_price) || 0) : acc, 0)
     const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0)
-    const netProfit = totalSales - bagCosts - totalExpenses
+    const netProfit = bags.filter(b => b.status === 'sold').reduce((acc, b) => acc + calculateProfit(b), 0) - totalExpenses
+
+    const sortedExpenses = [...expenses].sort((a, b) => {
+        if (expenseSort === 'date_asc') return a.date.localeCompare(b.date)
+        if (expenseSort === 'amount_desc') return b.amount - a.amount
+        if (expenseSort === 'amount_asc') return a.amount - b.amount
+        return b.date.localeCompare(a.date) // date_desc default
+    })
 
     return (
         <section>
@@ -88,8 +102,8 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
                     <Calculator size={24} /> Pilotage Business
                 </h2>
                 <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button onClick={exportCSV} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Download size={20} /> Exporter CSV
+                    <button onClick={exportCSV} className="btn-secondary" disabled={exporting} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Download size={20} /> {exporting ? 'Export...' : 'Exporter CSV'}
                     </button>
                     <button onClick={() => setShowModal(true)} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Plus size={20} /> Nouvelle dépense
@@ -113,6 +127,15 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
                 />
             </div>
 
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0 }}>Dépenses générales</h3>
+                <select value={expenseSort} onChange={e => setExpenseSort(e.target.value)} style={{ padding: '0.5rem 0.75rem', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'white', cursor: 'pointer', fontSize: '0.85rem' }}>
+                    <option value="date_desc">Date (récente)</option>
+                    <option value="date_asc">Date (ancienne)</option>
+                    <option value="amount_desc">Montant ↓</option>
+                    <option value="amount_asc">Montant ↑</option>
+                </select>
+            </div>
             <div className="inventory-grid" style={{ gridTemplateColumns: '1fr' }}>
                 <div className="bag-card" style={{ padding: '0' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -126,7 +149,7 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
                             </tr>
                         </thead>
                         <tbody>
-                            {expenses.map(e => (
+                            {sortedExpenses.map(e => (
                                 <tr key={e.id} style={{ borderBottom: '1px solid #eee' }}>
                                     <td style={{ padding: '1rem' }}>{e.date}</td>
                                     <td style={{ padding: '1rem' }}>{e.description}</td>

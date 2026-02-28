@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Package, Trash2, Plus, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { confirm } from './ConfirmDialog';
 
 function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
     const [consumablesList, setConsumablesList] = useState([]); // Linked consumables
@@ -82,7 +83,7 @@ function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
     };
 
     const handleDeleteLink = async (id, cost) => {
-        if (!confirm('Retirer ce produit et annuler le coût associé ?')) return;
+        if (!await confirm('Retirer ce produit et annuler le coût associé ?')) return;
         try {
             const resp = await authenticatedFetch(`/api/bag-consumables/${id}`, { method: 'DELETE' });
             if (resp.ok) {

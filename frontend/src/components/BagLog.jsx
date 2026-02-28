@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Calendar, Trash2, Plus, History } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { confirm } from './ConfirmDialog';
 
 function BagLog({ bagId, authenticatedFetch }) {
     const [logs, setLogs] = useState([]);
@@ -61,7 +62,7 @@ function BagLog({ bagId, authenticatedFetch }) {
     };
 
     const handleDeleteLog = async (id) => {
-        if (!confirm('Supprimer cette entrée ?')) return;
+        if (!await confirm('Supprimer cette entrée ?')) return;
         try {
             const resp = await authenticatedFetch(`/api/logs/${id}`, { method: 'DELETE' });
             if (resp.ok) {

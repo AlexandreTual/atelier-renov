@@ -39,6 +39,18 @@ if (!JWT_SECRET || !ADMIN_PASSWORD) {
     process.exit(1);
 }
 
+// --- Configuration constants ---
+const FILE_SIZE_LIMIT_MB = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;   // 15 min
+const LOGIN_MAX_ATTEMPTS = 10;
+const API_WINDOW_MS = 60 * 1000;           // 1 min
+const API_MAX_REQUESTS = 120;
+const UPLOAD_WINDOW_MS = 60 * 1000;        // 1 min
+const UPLOAD_MAX_REQUESTS = 20;
+const BCRYPT_ROUNDS = 10;
+const PG_POOL_MAX = 20;
+const JWT_EXPIRES_IN = '24h';
+
 // --- Cloudinary Config (Cloud Mode) ---
 if (!IS_LOCAL) {
     cloudinary.config({
@@ -81,7 +93,7 @@ app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-app.use(pinoHttp({ logger }));
+app.use(pinoHttp({ logger, redact: ['req.headers.authorization'] }));
 
 // Serve local uploads if in local mode
 if (IS_LOCAL) {
@@ -96,7 +108,7 @@ if (IS_LOCAL) {
 const storage = multer.memoryStorage();
 const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: FILE_SIZE_LIMIT_MB * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
         allowed.includes(file.mimetype)
@@ -247,7 +259,8 @@ async function setupDb() {
         } else {
             db = new Pool({
                 connectionString: process.env.DATABASE_URL,
-                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+                max: PG_POOL_MAX
             });
             logger.info('Connected to PostgreSQL');
         }
@@ -398,6 +411,7 @@ async function setupDb() {
         await query('CREATE INDEX IF NOT EXISTS idx_bag_consumables_consumable_id ON bag_consumables(consumable_id)');
         await query('CREATE INDEX IF NOT EXISTS idx_bags_status ON bags(status)');
         await query('CREATE INDEX IF NOT EXISTS idx_bags_brand ON bags(brand)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bags_created_at ON bags(created_at)');
 
         const brandsCount = await query('SELECT COUNT(*) as count FROM brands');
         const count = brandsCount.rows[0].count;
@@ -424,7 +438,7 @@ async function setupDb() {
         await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
         const admins = await query('SELECT * FROM users WHERE username = ?', ['admin']);
         if (admins.rows.length === 0) {
-            const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
+            const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS);
             await query('INSERT INTO users (username, password) VALUES (?, ?)', ['admin', hashedPassword]);
             logger.info('Admin user created');
         }
@@ -447,9 +461,14 @@ const auth = (req, res, next) => {
 };
 
 const validateBag = (req, res, next) => {
-    const { name, purchase_price, target_resale_price } = req.body;
+    const { name, purchase_price, target_resale_price, listing_url } = req.body;
     if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Le nom du modèle est obligatoire' });
+    }
+    if (listing_url && listing_url.trim() !== '') {
+        try { new URL(listing_url); } catch {
+            return res.status(400).json({ error: 'L\'URL de l\'annonce n\'est pas valide' });
+        }
     }
     req.body.purchase_price = parseFloat(purchase_price) || 0;
     req.body.target_resale_price = parseFloat(target_resale_price) || 0;
@@ -464,20 +483,20 @@ const validateBag = (req, res, next) => {
 };
 
 const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
+    windowMs: LOGIN_WINDOW_MS,
+    max: LOGIN_MAX_ATTEMPTS,
     message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
 });
 
 const apiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
+    windowMs: API_WINDOW_MS,
+    max: API_MAX_REQUESTS,
     message: { error: 'Trop de requêtes, réessayez dans une minute' }
 });
 
 const uploadLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 20,
+    windowMs: UPLOAD_WINDOW_MS,
+    max: UPLOAD_MAX_REQUESTS,
     message: { error: "Trop d'uploads, réessayez dans une minute" }
 });
 
@@ -490,10 +509,10 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         const user = result.rows[0];
 
         if (user && await bcrypt.compare(password, user.password)) {
-            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
             return res.json({ token });
         }
-        res.status(401).json({ error: 'Mot de passe incorrect' });
+        res.status(401).json({ error: 'Identifiants invalides' });
     } catch (err) {
         logger.error({ err });
         res.status(500).json({ error: 'Erreur lors de la connexion' });
@@ -510,7 +529,7 @@ app.post('/api/change-password', auth, async (req, res) => {
         const user = result.rows[0];
 
         if (user && await bcrypt.compare(currentPassword, user.password)) {
-            const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+            const hashedNewPassword = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
             await query('UPDATE users SET password = ? WHERE id = ?', [hashedNewPassword, req.user.id]);
             return res.json({ success: true });
         }
@@ -556,7 +575,7 @@ app.post('/api/bags', auth, validateBag, async (req, res) => {
         res.json({ id });
     } catch (err) {
         logger.error({ err });
-        res.status(500).json({ error: 'Failed to create bag' });
+        res.status(500).json({ error: 'Erreur lors de la création' });
     }
 });
 
@@ -578,11 +597,11 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
             WHERE id = ?`,
             [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', listing_url || null, id]
         );
-        if (result.rowCount === 0) return res.status(404).json({ error: 'Bag not found' });
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Article non trouvé' });
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
-        res.status(500).json({ error: 'Failed to update bag' });
+        res.status(500).json({ error: 'Erreur lors de la mise à jour' });
     }
 });
 
@@ -597,7 +616,7 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
-        res.status(500).json({ error: 'Failed to delete bag' });
+        res.status(500).json({ error: 'Erreur lors de la suppression' });
     }
 });
 
@@ -703,7 +722,7 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM bag_consumables WHERE id = ?', [req.params.id]);
         const link = result.rows[0];
-        if (!link) return res.status(404).json({ error: 'Link not found' });
+        if (!link) return res.status(404).json({ error: 'Liaison non trouvée' });
 
         await withTransaction(async (txQuery) => {
             await txQuery(
@@ -738,7 +757,7 @@ app.post('/api/bags/:id/images', auth, async (req, res) => {
         res.json({ id: imageId, url });
     } catch (err) {
         logger.error({ err });
-        res.status(500).json({ error: 'Failed to link image' });
+        res.status(500).json({ error: 'Erreur lors de l\'ajout de l\'image' });
     }
 });
 
@@ -754,7 +773,7 @@ app.delete('/api/images/:id', auth, async (req, res) => {
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
-        res.status(500).json({ error: 'Failed to delete image' });
+        res.status(500).json({ error: 'Erreur lors de la suppression de l\'image' });
     }
 });
 
@@ -773,7 +792,7 @@ app.post('/api/upload', auth, uploadLimiter, (req, res, next) => {
         res.json(result); // { url, public_id }
     } catch (err) {
         logger.error({ err }, 'Image processing failed');
-        res.status(500).json({ error: 'Failed to process image' });
+        res.status(500).json({ error: 'Erreur lors du traitement de l\'image' });
     }
 });
 
@@ -786,7 +805,7 @@ app.get('/api/dashboard-lists', auth, async (req, res) => {
             return { ...l, filters };
         }));
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch dashboard lists' });
+        res.status(500).json({ error: 'Erreur lors du chargement des listes' });
     }
 });
 
@@ -799,7 +818,7 @@ app.post('/api/dashboard-lists', auth, async (req, res) => {
         );
         res.json({ id });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to create dashboard list' });
+        res.status(500).json({ error: 'Erreur lors de la création de la liste' });
     }
 });
 
@@ -813,7 +832,7 @@ app.put('/api/dashboard-lists/:id', auth, async (req, res) => {
         );
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update dashboard list' });
+        res.status(500).json({ error: 'Erreur lors de la mise à jour de la liste' });
     }
 });
 
@@ -823,7 +842,7 @@ app.delete('/api/dashboard-lists/:id', auth, async (req, res) => {
         await query('DELETE FROM dashboard_lists WHERE id = ?', [id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to delete dashboard list' });
+        res.status(500).json({ error: 'Erreur lors de la suppression de la liste' });
     }
 });
 
@@ -835,7 +854,7 @@ app.post('/api/dashboard-lists/reorder', auth, async (req, res) => {
         ));
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to reorder dashboard lists' });
+        res.status(500).json({ error: 'Erreur lors de la réorganisation des listes' });
     }
 });
 
@@ -844,7 +863,7 @@ app.get('/api/consumables', auth, async (req, res) => {
         const result = await query('SELECT * FROM consumables WHERE deleted_at IS NULL ORDER BY created_at DESC');
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch consumables' });
+        res.status(500).json({ error: 'Erreur lors du chargement des produits' });
     }
 });
 
@@ -861,7 +880,7 @@ app.post('/api/consumables', auth, async (req, res) => {
         );
         res.json({ id });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to create consumable' });
+        res.status(500).json({ error: 'Erreur lors de la création du produit' });
     }
 });
 
@@ -879,7 +898,7 @@ app.put('/api/consumables/:id', auth, async (req, res) => {
         );
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update consumable' });
+        res.status(500).json({ error: 'Erreur lors de la mise à jour du produit' });
     }
 });
 
@@ -893,7 +912,7 @@ app.delete('/api/consumables/:id', auth, async (req, res) => {
         if (result.rowCount === 0) return res.status(404).json({ error: 'Produit non trouvé' });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to delete consumable' });
+        res.status(500).json({ error: 'Erreur lors de la suppression du produit' });
     }
 });
 
@@ -902,7 +921,7 @@ app.get('/api/expenses', auth, async (req, res) => {
         const result = await query('SELECT * FROM expenses WHERE deleted_at IS NULL ORDER BY date DESC, created_at DESC');
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch expenses' });
+        res.status(500).json({ error: 'Erreur lors du chargement des dépenses' });
     }
 });
 
@@ -918,7 +937,7 @@ app.post('/api/expenses', auth, async (req, res) => {
         );
         res.json({ id });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to create expense' });
+        res.status(500).json({ error: 'Erreur lors de la création de la dépense' });
     }
 });
 
@@ -932,7 +951,7 @@ app.put('/api/expenses/:id', auth, async (req, res) => {
         );
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update expense' });
+        res.status(500).json({ error: 'Erreur lors de la mise à jour de la dépense' });
     }
 });
 
@@ -946,7 +965,7 @@ app.delete('/api/expenses/:id', auth, async (req, res) => {
         if (result.rowCount === 0) return res.status(404).json({ error: 'Dépense non trouvée' });
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to delete expense' });
+        res.status(500).json({ error: 'Erreur lors de la suppression de la dépense' });
     }
 });
 
@@ -1010,6 +1029,14 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
     }
 });
 
+function csvEscape(value) {
+    const str = String(value ?? '');
+    if (/^[=+\-@]/.test(str) || str.includes(';') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
 app.get('/api/export/csv', auth, async (req, res) => {
     try {
         const bagsRes = await query('SELECT * FROM bags WHERE status = ? AND deleted_at IS NULL', ['sold']);
@@ -1021,18 +1048,18 @@ app.get('/api/export/csv', auth, async (req, res) => {
 
         bags.forEach(b => {
             const margin = b.actual_resale_price - b.purchase_price - b.fees - b.material_costs;
-            csv += `Vente;${b.sale_date || b.created_at};${b.brand} ${b.name};${b.actual_resale_price};${margin.toFixed(2)}\n`;
+            csv += `Vente;${csvEscape(b.sale_date || b.created_at)};${csvEscape((b.brand || '') + ' ' + (b.name || ''))};${b.actual_resale_price};${margin.toFixed(2)}\n`;
         });
 
         expenses.forEach(e => {
-            csv += `Dépense;${e.date};${e.description};-${e.amount};0\n`;
+            csv += `Dépense;${csvEscape(e.date)};${csvEscape(e.description)};-${e.amount};0\n`;
         });
 
         res.setHeader('Content-Type', 'text/csv');
         res.setHeader('Content-Disposition', 'attachment; filename=tableau_de_bord.csv');
         res.send(csv);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to export CSV' });
+        res.status(500).json({ error: 'Erreur lors de l\'export CSV' });
     }
 });
 
@@ -1041,7 +1068,7 @@ app.get('/api/brands', auth, async (req, res) => {
         const result = await query('SELECT * FROM brands ORDER BY name ASC');
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch brands' });
+        res.status(500).json({ error: 'Erreur lors du chargement des marques' });
     }
 });
 
@@ -1052,84 +1079,96 @@ app.get('/api/item-types', auth, async (req, res) => {
         const result = await query('SELECT * FROM item_types ORDER BY name ASC');
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch item types' });
+        res.status(500).json({ error: 'Erreur lors du chargement des types' });
     }
 });
 
 app.post('/api/item-types', auth, async (req, res) => {
     try {
         const { name } = req.body;
-        if (!name) return res.status(400).json({ error: 'Name required' });
+        if (!name) return res.status(400).json({ error: 'Le nom est obligatoire' });
         const id = await insertAndGetId('INSERT INTO item_types (name) VALUES (?)', [name]);
         res.json({ id });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to add item type' });
+        res.status(500).json({ error: 'Erreur lors de la création du type' });
     }
 });
 
 app.post('/api/brands', auth, async (req, res) => {
     try {
         const { name } = req.body;
-        if (!name) return res.status(400).json({ error: 'Brand name is required' });
+        if (!name) return res.status(400).json({ error: 'Le nom de la marque est obligatoire' });
         const id = await insertAndGetId('INSERT INTO brands (name) VALUES (?)', [name]);
         res.json({ id, name });
     } catch (err) {
         if (err.message.includes('unique constraint') || err.message.includes('duplicate key') || err.message.includes('UNIQUE constraint failed')) {
             return res.status(400).json({ error: 'Cette marque existe déjà' });
         }
-        res.status(500).json({ error: 'Failed to create brand' });
+        res.status(500).json({ error: 'Erreur lors de la création de la marque' });
     }
 });
 
 app.put('/api/brands/:id', auth, async (req, res) => {
     try {
         const { name } = req.body;
-        if (!name) return res.status(400).json({ error: 'Name required' });
+        if (!name) return res.status(400).json({ error: 'Le nom est obligatoire' });
         await query('UPDATE brands SET name = ? WHERE id = ?', [name, req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update brand' });
+        res.status(500).json({ error: 'Erreur lors de la mise à jour de la marque' });
     }
 });
 
 app.delete('/api/brands/:id', auth, async (req, res) => {
     try {
+        const brandResult = await query('SELECT name FROM brands WHERE id = ?', [req.params.id]);
+        if (brandResult.rows.length === 0) return res.status(404).json({ error: 'Marque non trouvée' });
+        const brandName = brandResult.rows[0].name;
+        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE brand = ? AND deleted_at IS NULL', [brandName]);
+        const count = parseInt(usageResult.rows[0].count) || 0;
+        if (count > 0) return res.status(409).json({ error: `Cette marque est utilisée par ${count} article(s). Supprimez ou modifiez ces articles d'abord.` });
         await query('DELETE FROM brands WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to delete brand' });
+        res.status(500).json({ error: 'Erreur lors de la suppression de la marque' });
     }
 });
 
 app.put('/api/item-types/:id', auth, async (req, res) => {
     try {
         const { name } = req.body;
-        if (!name) return res.status(400).json({ error: 'Name required' });
+        if (!name) return res.status(400).json({ error: 'Le nom est obligatoire' });
         await query('UPDATE item_types SET name = ? WHERE id = ?', [name, req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to update item type' });
+        res.status(500).json({ error: 'Erreur lors de la mise à jour du type' });
     }
 });
 
 app.delete('/api/item-types/:id', auth, async (req, res) => {
     try {
+        const typeResult = await query('SELECT name FROM item_types WHERE id = ?', [req.params.id]);
+        if (typeResult.rows.length === 0) return res.status(404).json({ error: 'Type non trouvé' });
+        const typeName = typeResult.rows[0].name;
+        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE item_type = ? AND deleted_at IS NULL', [typeName]);
+        const count = parseInt(usageResult.rows[0].count) || 0;
+        if (count > 0) return res.status(409).json({ error: `Ce type est utilisé par ${count} article(s). Supprimez ou modifiez ces articles d'abord.` });
         await query('DELETE FROM item_types WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to delete item type' });
+        res.status(500).json({ error: 'Erreur lors de la suppression du type' });
     }
 });
 
 app.get('/api/bags/:id', auth, async (req, res) => {
     try {
         const bagResult = await query('SELECT * FROM bags WHERE id = ?', [req.params.id]);
-        if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Bag not found' });
+        if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Article non trouvé' });
         const bag = bagResult.rows[0];
         const imagesResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
         res.json({ ...bag, images: imagesResult.rows });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch bag' });
+        res.status(500).json({ error: 'Erreur lors du chargement de l\'article' });
     }
 });
 

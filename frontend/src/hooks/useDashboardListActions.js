@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { toast } from 'react-hot-toast';
+import { confirm } from '../components/ConfirmDialog';
 
 export const useDashboardListActions = (authenticatedFetch, onSuccess) => {
     const handleSaveList = useCallback(async (listData, setShowListModal) => {
@@ -26,7 +27,7 @@ export const useDashboardListActions = (authenticatedFetch, onSuccess) => {
     }, [authenticatedFetch, onSuccess]);
 
     const handleDeleteList = useCallback(async (id, setShowListModal) => {
-        if (!confirm('Supprimer cette liste ?')) return;
+        if (!await confirm('Supprimer cette liste ?')) return;
         try {
             const resp = await authenticatedFetch(`/api/dashboard-lists/${id}`, { method: 'DELETE' });
             if (resp.ok) {
@@ -51,6 +52,7 @@ export const useDashboardListActions = (authenticatedFetch, onSuccess) => {
 
         if (targetIndex < 0 || targetIndex >= newLists.length) return;
 
+        const previousLists = [...dashboardLists];
         const temp = newLists[listIndex];
         newLists[listIndex] = newLists[targetIndex];
         newLists[targetIndex] = temp;
@@ -69,15 +71,15 @@ export const useDashboardListActions = (authenticatedFetch, onSuccess) => {
                 body: JSON.stringify({ orders })
             });
             if (!resp.ok) {
-                onSuccess(); // Rollback
+                setDashboardLists(previousLists);
                 toast.error('Échec de la réorganisation');
             }
         } catch (err) {
             console.error('Failed to reorder lists', err);
-            onSuccess();
+            setDashboardLists(previousLists);
             toast.error('Erreur technique');
         }
-    }, [authenticatedFetch, onSuccess]);
+    }, [authenticatedFetch]);
 
     return { handleSaveList, handleDeleteList, handleReorderList };
 };

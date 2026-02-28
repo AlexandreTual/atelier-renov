@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Trash2, Edit2, Package, AlertTriangle } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { confirm } from './ConfirmDialog'
 
 const LOW_STOCK_THRESHOLD = 20
 
 function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
     const [selectedItem, setSelectedItem] = useState(null)
+    const [searchTerm, setSearchTerm] = useState('')
     const [formData, setFormData] = useState({
         name: '',
         brand: '',
@@ -61,7 +63,7 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
     }
 
     const handleDelete = async (id) => {
-        if (!confirm('Supprimer ce produit ?')) return
+        if (!await confirm('Supprimer ce produit ?')) return
         try {
             const resp = await authenticatedFetch(`/api/consumables/${id}`, { method: 'DELETE' })
             if (resp.ok) {
@@ -76,11 +78,15 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
         }
     }
 
+    const filteredConsumables = consumables.filter(c =>
+        c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (c.brand && c.brand.toLowerCase().includes(searchTerm.toLowerCase()))
+    )
     const lowStockItems = consumables.filter(c => c.remaining_percentage < LOW_STOCK_THRESHOLD)
 
     return (
         <section>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
                 <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <Package size={24} /> Inventaire Consommables
                 </h2>
@@ -88,6 +94,14 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
                     <Plus size={20} /> Ajouter un produit
                 </button>
             </div>
+
+            <input
+                type="text"
+                placeholder="Rechercher un produit ou une marque..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                style={{ width: '100%', padding: '0.75rem 1rem', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none', marginBottom: '1.5rem', boxSizing: 'border-box' }}
+            />
 
             {lowStockItems.length > 0 && (
                 <div style={{
@@ -112,7 +126,7 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
             )}
 
             <div className="inventory-grid">
-                {consumables.map(item => (
+                {filteredConsumables.map(item => (
                     <div key={item.id} className="bag-card" style={{ padding: '1rem', outline: item.remaining_percentage < LOW_STOCK_THRESHOLD ? '2px solid #f59e0b' : 'none' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
                             <div>
@@ -155,7 +169,7 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
                             }}></div>
                         </div>
                         <p style={{ fontSize: '0.8rem', color: '#666', textAlign: 'right', margin: 0 }}>
-                            Quantité: {item.remaining_percentage}%
+                            Stock disponible : {item.remaining_percentage}%
                         </p>
 
                         <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>

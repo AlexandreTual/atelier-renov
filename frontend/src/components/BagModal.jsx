@@ -5,6 +5,7 @@ import BeforeAfterSlider from './BeforeAfterSlider'
 import BagLog from './BagLog'
 import BagConsumables from './BagConsumables'
 import { STATUSES } from '../constants'
+import { calculateProfit, calculateMargin } from '../utils/finance'
 
 const SELLING_STATUSES = ['ready_for_sale', 'selling']
 
@@ -63,8 +64,12 @@ function BagModal({
         setUploading(true)
         try {
             await onImageAdd(file, type)
+        } catch (err) {
+            console.error('Image upload failed', err)
+            toast.error('Échec de l\'upload — les données du formulaire sont conservées')
         } finally {
             setUploading(false)
+            e.target.value = ''
         }
     }
 
@@ -136,7 +141,7 @@ function BagModal({
 
                     handleSubmit(e);
                 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
                         <div className="form-group">
                             <label>Type</label>
                             <input
@@ -203,6 +208,7 @@ function BagModal({
                                                 src={img.url}
                                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                                 alt="Before"
+                                                loading="lazy"
                                                 onClick={() => setViewImage(img)}
                                             />
                                             <button type="button" onClick={(e) => { e.stopPropagation(); onImageDelete(img); }} style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', padding: '2px', cursor: 'pointer' }}><X size={12} /></button>
@@ -254,6 +260,7 @@ function BagModal({
                                             src={img.url}
                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                             alt="Other"
+                                            loading="lazy"
                                             onClick={() => setViewImage(img)}
                                         />
                                         <button type="button" onClick={(e) => { e.stopPropagation(); onImageDelete(img); }} style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', padding: '2px', cursor: 'pointer' }}><X size={12} /></button>
@@ -287,17 +294,9 @@ function BagModal({
                     </div>
 
                     {(() => {
-                        const purchase = parseFloat(formData.purchase_price) || 0
-                        const target = parseFloat(formData.target_resale_price) || 0
-                        const material = parseFloat(formData.material_costs) || 0
-                        const fees = parseFloat(formData.fees) || 0
-                        const actual = parseFloat(formData.actual_resale_price) || 0
                         const isSold = formData.status === 'sold'
-                        const profit = isSold
-                            ? actual - purchase - fees - material
-                            : target - purchase - material
-                        const costBase = purchase + material
-                        const marginPct = costBase > 0 ? (profit / costBase * 100) : null
+                        const profit = calculateProfit(formData)
+                        const marginPct = calculateMargin(profit, formData)
                         const color = profit >= 0 ? '#2ecc71' : '#e74c3c'
                         return (
                             <div style={{ background: profit >= 0 ? '#eafaf1' : '#fdedec', borderRadius: '8px', padding: '0.6rem 1rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -314,7 +313,7 @@ function BagModal({
                         )
                     })()}
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', background: '#f9f9f9', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem', background: '#f9f9f9', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
                         <div className="form-group">
                             <label>Achat (€)</label>
                             <input
@@ -390,6 +389,18 @@ function BagModal({
                     )}
 
                     <div className="form-group">
+                        <label>Temps passé (heures)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={formData.time_spent || ''}
+                            onChange={e => setFormData({ ...formData, time_spent: e.target.value })}
+                            placeholder="ex: 2.5"
+                        />
+                    </div>
+
+                    <div className="form-group">
                         <label>Notes & État</label>
                         <textarea rows="3" value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} placeholder="Détails sur les réparations à prévoir..."></textarea>
                     </div>
@@ -410,23 +421,39 @@ function BagModal({
                         </>
                     )}
 
-                    {SELLING_STATUSES.includes(formData.status) && (
+                    {(SELLING_STATUSES.includes(formData.status) || formData.status === 'sold') && (
                         <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                                 <span style={{ fontWeight: '600', fontSize: '0.9rem', color: '#0369a1' }}>Mise en vente</span>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const text = generateVintedDescription(formData)
-                                        navigator.clipboard.writeText(text)
-                                            .then(() => toast.success('Description copiée !'))
-                                            .catch(() => toast.error('Erreur de copie'))
-                                    }}
-                                    className="btn-secondary"
-                                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
-                                >
-                                    <Clipboard size={14} /> Copier fiche Vinted
-                                </button>
+                                {SELLING_STATUSES.includes(formData.status) && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const text = generateVintedDescription(formData)
+                                            const fallbackCopy = () => {
+                                                const ta = document.createElement('textarea')
+                                                ta.value = text
+                                                ta.style.cssText = 'position:fixed;opacity:0'
+                                                document.body.appendChild(ta)
+                                                ta.select()
+                                                try { document.execCommand('copy'); toast.success('Description copiée !') }
+                                                catch { toast.error('Erreur de copie') }
+                                                document.body.removeChild(ta)
+                                            }
+                                            if (navigator.clipboard) {
+                                                navigator.clipboard.writeText(text)
+                                                    .then(() => toast.success('Description copiée !'))
+                                                    .catch(fallbackCopy)
+                                            } else {
+                                                fallbackCopy()
+                                            }
+                                        }}
+                                        className="btn-secondary"
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
+                                    >
+                                        <Clipboard size={14} /> Copier fiche Vinted
+                                    </button>
+                                )}
                             </div>
                             <div className="form-group" style={{ marginBottom: 0 }}>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
