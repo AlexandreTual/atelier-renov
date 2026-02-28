@@ -141,7 +141,7 @@ function BagModal({
 
                     handleSubmit(e);
                 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem' }}>
                         <div className="form-group">
                             <label>Type</label>
                             <input
@@ -313,7 +313,7 @@ function BagModal({
                         )
                     })()}
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', background: '#f9f9f9', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '1rem', background: '#f9f9f9', padding: '1rem', borderRadius: '8px', marginBottom: '1.5rem' }}>
                         <div className="form-group">
                             <label>Achat (€)</label>
                             <input
@@ -387,6 +387,18 @@ function BagModal({
                             </div>
                         </div>
                     )}
+
+                    <div className="form-group">
+                        <label>Temps passé (heures)</label>
+                        <input
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={formData.time_spent || ''}
+                            onChange={e => setFormData({ ...formData, time_spent: e.target.value })}
+                            placeholder="ex: 2.5"
+                        />
+                    </div>
 
                     <div className="form-group">
                         <label>Notes & État</label>

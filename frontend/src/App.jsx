@@ -88,7 +88,7 @@ function App() {
       setFormData({
         name: '', brand: '', item_type: '', purchase_price: '', target_resale_price: '',
         actual_resale_price: '', status: 'to_be_cleaned', fees: '',
-        material_costs: '', notes: '', purchase_source: '', is_donation: 0, listing_url: '', images: []
+        material_costs: '', time_spent: '', notes: '', purchase_source: '', is_donation: 0, listing_url: '', images: []
       })
     }
     setShowModal(true)

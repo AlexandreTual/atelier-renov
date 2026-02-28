@@ -39,6 +39,18 @@ if (!JWT_SECRET || !ADMIN_PASSWORD) {
     process.exit(1);
 }
 
+// --- Configuration constants ---
+const FILE_SIZE_LIMIT_MB = 10;
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;   // 15 min
+const LOGIN_MAX_ATTEMPTS = 10;
+const API_WINDOW_MS = 60 * 1000;           // 1 min
+const API_MAX_REQUESTS = 120;
+const UPLOAD_WINDOW_MS = 60 * 1000;        // 1 min
+const UPLOAD_MAX_REQUESTS = 20;
+const BCRYPT_ROUNDS = 10;
+const PG_POOL_MAX = 20;
+const JWT_EXPIRES_IN = '24h';
+
 // --- Cloudinary Config (Cloud Mode) ---
 if (!IS_LOCAL) {
     cloudinary.config({
@@ -96,7 +108,7 @@ if (IS_LOCAL) {
 const storage = multer.memoryStorage();
 const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 },
+    limits: { fileSize: FILE_SIZE_LIMIT_MB * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
         const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
         allowed.includes(file.mimetype)
@@ -248,7 +260,7 @@ async function setupDb() {
             db = new Pool({
                 connectionString: process.env.DATABASE_URL,
                 ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
-                max: 20
+                max: PG_POOL_MAX
             });
             logger.info('Connected to PostgreSQL');
         }
@@ -426,7 +438,7 @@ async function setupDb() {
         await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
         const admins = await query('SELECT * FROM users WHERE username = ?', ['admin']);
         if (admins.rows.length === 0) {
-            const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 10);
+            const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS);
             await query('INSERT INTO users (username, password) VALUES (?, ?)', ['admin', hashedPassword]);
             logger.info('Admin user created');
         }
@@ -471,20 +483,20 @@ const validateBag = (req, res, next) => {
 };
 
 const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    max: 10,
+    windowMs: LOGIN_WINDOW_MS,
+    max: LOGIN_MAX_ATTEMPTS,
     message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
 });
 
 const apiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 120,
+    windowMs: API_WINDOW_MS,
+    max: API_MAX_REQUESTS,
     message: { error: 'Trop de requêtes, réessayez dans une minute' }
 });
 
 const uploadLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 20,
+    windowMs: UPLOAD_WINDOW_MS,
+    max: UPLOAD_MAX_REQUESTS,
     message: { error: "Trop d'uploads, réessayez dans une minute" }
 });
 
@@ -497,7 +509,7 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         const user = result.rows[0];
 
         if (user && await bcrypt.compare(password, user.password)) {
-            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
+            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
             return res.json({ token });
         }
         res.status(401).json({ error: 'Identifiants invalides' });
@@ -517,7 +529,7 @@ app.post('/api/change-password', auth, async (req, res) => {
         const user = result.rows[0];
 
         if (user && await bcrypt.compare(currentPassword, user.password)) {
-            const hashedNewPassword = await bcrypt.hash(newPassword, 10);
+            const hashedNewPassword = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
             await query('UPDATE users SET password = ? WHERE id = ?', [hashedNewPassword, req.user.id]);
             return res.json({ success: true });
         }
@@ -585,7 +597,7 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
             WHERE id = ?`,
             [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', listing_url || null, id]
         );
-        if (result.rowCount === 0) return res.status(404).json({ error: 'Bag not found' });
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Article non trouvé' });
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
@@ -710,7 +722,7 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
     try {
         const result = await query('SELECT * FROM bag_consumables WHERE id = ?', [req.params.id]);
         const link = result.rows[0];
-        if (!link) return res.status(404).json({ error: 'Link not found' });
+        if (!link) return res.status(404).json({ error: 'Liaison non trouvée' });
 
         await withTransaction(async (txQuery) => {
             await txQuery(
@@ -1151,7 +1163,7 @@ app.delete('/api/item-types/:id', auth, async (req, res) => {
 app.get('/api/bags/:id', auth, async (req, res) => {
     try {
         const bagResult = await query('SELECT * FROM bags WHERE id = ?', [req.params.id]);
-        if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Bag not found' });
+        if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Article non trouvé' });
         const bag = bagResult.rows[0];
         const imagesResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
         res.json({ ...bag, images: imagesResult.rows });
