@@ -1,9 +1,39 @@
 import React, { useState } from 'react'
-import { X, Trash2, Image as ImageIcon, Plus, Loader2, Camera } from 'lucide-react'
+import { X, Trash2, Image as ImageIcon, Plus, Loader2, Camera, Clipboard, ExternalLink } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import BeforeAfterSlider from './BeforeAfterSlider'
 import BagLog from './BagLog'
 import BagConsumables from './BagConsumables'
 import { STATUSES } from '../constants'
+
+const SELLING_STATUSES = ['ready_for_sale', 'selling']
+
+function generateVintedDescription(formData) {
+    const brand = formData.brand || ''
+    const itemType = formData.item_type || ''
+    const name = formData.name || ''
+    const price = parseFloat(formData.target_resale_price) || 0
+    const notes = formData.notes || ''
+
+    const lines = [
+        `${itemType} ${brand} — ${name}`.trim(),
+        '',
+        '✨ Article rénové avec soin',
+    ]
+    if (notes) {
+        lines.push('', notes)
+    }
+    lines.push('', `Prix : ${price.toFixed(2)} €`, '')
+    lines.push('N\'hésitez pas à me poser vos questions !')
+
+    const hashtags = [brand, itemType, 'renovation', 'luxe', 'secondemain']
+        .filter(Boolean)
+        .map(t => '#' + t.replace(/\s+/g, ''))
+        .join(' ')
+    if (hashtags) lines.push('', hashtags)
+
+    return lines.join('\n')
+}
 
 function BagModal({
     show,
@@ -372,12 +402,44 @@ function BagModal({
                                 onUpdateCost={(costDiff) => {
                                     setFormData(prev => ({
                                         ...prev,
-                                        material_costs: Math.max(0, (prev.material_costs || 0) + costDiff)
+                                        material_costs: Math.max(0, parseFloat(prev.material_costs || 0) + costDiff)
                                     }));
                                 }}
                             />
                             <BagLog bagId={selectedBag.id} authenticatedFetch={authenticatedFetch} />
                         </>
+                    )}
+
+                    {SELLING_STATUSES.includes(formData.status) && (
+                        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+                                <span style={{ fontWeight: '600', fontSize: '0.9rem', color: '#0369a1' }}>Mise en vente</span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const text = generateVintedDescription(formData)
+                                        navigator.clipboard.writeText(text)
+                                            .then(() => toast.success('Description copiée !'))
+                                            .catch(() => toast.error('Erreur de copie'))
+                                    }}
+                                    className="btn-secondary"
+                                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
+                                >
+                                    <Clipboard size={14} /> Copier fiche Vinted
+                                </button>
+                            </div>
+                            <div className="form-group" style={{ marginBottom: 0 }}>
+                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                    <ExternalLink size={14} /> Lien annonce
+                                </label>
+                                <input
+                                    type="url"
+                                    value={formData.listing_url || ''}
+                                    onChange={e => setFormData({ ...formData, listing_url: e.target.value })}
+                                    placeholder="https://www.vinted.fr/items/..."
+                                />
+                            </div>
+                        </div>
                     )}
 
                     <div className="modal-actions" style={{ marginTop: '2rem' }}>

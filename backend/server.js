@@ -366,6 +366,15 @@ async function setupDb() {
             )
         `);
 
+        // Migration: add listing_url to bags (idempotent)
+        try { await query('ALTER TABLE bags ADD COLUMN listing_url TEXT'); } catch(e) { /* already exists */ }
+
+        // Migration: soft delete columns (idempotent)
+        const tsType = IS_LOCAL ? 'DATETIME' : 'TIMESTAMP';
+        try { await query(`ALTER TABLE bags ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
+        try { await query(`ALTER TABLE consumables ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
+        try { await query(`ALTER TABLE expenses ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
+
         // Migration : add FK constraints on existing PostgreSQL tables (idempotent)
         if (!IS_LOCAL) {
             const fkMigrations = [
@@ -447,6 +456,10 @@ const validateBag = (req, res, next) => {
     req.body.actual_resale_price = parseFloat(req.body.actual_resale_price) || 0;
     req.body.fees = parseFloat(req.body.fees) || 0;
     req.body.material_costs = parseFloat(req.body.material_costs) || 0;
+    if (req.body.purchase_price < 0 || req.body.target_resale_price < 0 ||
+        req.body.actual_resale_price < 0 || req.body.fees < 0 || req.body.material_costs < 0) {
+        return res.status(400).json({ error: 'Les prix et frais ne peuvent pas être négatifs' });
+    }
     next();
 };
 
@@ -509,7 +522,7 @@ app.post('/api/change-password', auth, async (req, res) => {
 
 app.get('/api/bags', auth, async (req, res) => {
     try {
-        const bagsResult = await query('SELECT * FROM bags ORDER BY created_at DESC');
+        const bagsResult = await query('SELECT * FROM bags WHERE deleted_at IS NULL ORDER BY created_at DESC');
         const bags = bagsResult.rows;
 
         if (bags.length === 0) return res.json([]);
@@ -535,10 +548,10 @@ app.get('/api/bags', auth, async (req, res) => {
 
 app.post('/api/bags', auth, validateBag, async (req, res) => {
     try {
-        const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type } = req.body;
+        const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url } = req.body;
         const id = await insertAndGetId(
-            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac']
+            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', listing_url || null]
         );
         res.json({ id });
     } catch (err) {
@@ -553,7 +566,7 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
         const {
             name, brand, purchase_price, target_resale_price, actual_resale_price,
             status, purchase_date, sale_date, fees, material_costs, time_spent, notes,
-            purchase_source, is_donation, item_type
+            purchase_source, is_donation, item_type, listing_url
         } = req.body;
 
         const result = await query(
@@ -561,9 +574,9 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
                 name = ?, brand = ?, purchase_price = ?, target_resale_price = ?,
                 actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?,
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
-                purchase_source = ?, is_donation = ?, item_type = ?
+                purchase_source = ?, is_donation = ?, item_type = ?, listing_url = ?
             WHERE id = ?`,
-            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', id]
+            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', listing_url || null, id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Bag not found' });
         res.json({ success: true });
@@ -576,20 +589,11 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
 app.delete('/api/bags/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
-
-        const result = await query('SELECT * FROM images WHERE bag_id = ?', [id]);
-        const images = result.rows;
-
-        for (const img of images) {
-            await deleteImage(img);
-        }
-
-        // Explicit cleanup for all child tables (belt-and-suspenders alongside FK CASCADE)
-        await query('DELETE FROM bag_logs WHERE bag_id = ?', [id]);
-        await query('DELETE FROM bag_consumables WHERE bag_id = ?', [id]);
-        await query('DELETE FROM images WHERE bag_id = ?', [id]);
-        await query('DELETE FROM bags WHERE id = ?', [id]);
-
+        const result = await query(
+            'UPDATE bags SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
+            [id]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Article non trouvé' });
         res.json({ success: true });
     } catch (err) {
         logger.error({ err });
@@ -654,28 +658,29 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
         const { consumable_id, usage_percent } = req.body;
         const bag_id = req.params.id;
 
-        const cResult = await query('SELECT * FROM consumables WHERE id = ?', [consumable_id]);
-        const consumable = cResult.rows[0];
-        if (!consumable) return res.status(404).json({ error: 'Consumable not found' });
-
         const usagePct = parseFloat(usage_percent) || 0;
         if (usagePct <= 0 || usagePct > 100) {
             return res.status(400).json({ error: "Le pourcentage d'utilisation doit être entre 1 et 100" });
         }
-        if (usagePct > consumable.remaining_percentage) {
-            return res.status(400).json({ error: 'Stock insuffisant' });
-        }
 
-        const cost = (consumable.purchase_price || 0) * (usagePct / 100);
+        const cResult = await query('SELECT * FROM consumables WHERE id = ? AND deleted_at IS NULL', [consumable_id]);
+        const consumable = cResult.rows[0];
+        if (!consumable) return res.status(404).json({ error: 'Produit introuvable' });
+
+        const cost = parseFloat(((consumable.purchase_price || 0) * (usagePct / 100)).toFixed(4));
 
         await withTransaction(async (txQuery) => {
+            // UPDATE conditionnel atomique : échoue si stock insuffisant au moment du commit (élimine la race condition)
+            const stockResult = await txQuery(
+                'UPDATE consumables SET remaining_percentage = remaining_percentage - ? WHERE id = ? AND remaining_percentage >= ?',
+                [usagePct, consumable_id, usagePct]
+            );
+            if (stockResult.rowCount === 0) {
+                throw Object.assign(new Error('Stock insuffisant'), { code: 'STOCK_INSUFFISANT' });
+            }
             await txQuery(
                 'INSERT INTO bag_consumables (bag_id, consumable_id, used_percentage, cost_at_time) VALUES (?, ?, ?, ?)',
                 [bag_id, consumable_id, usagePct, cost]
-            );
-            await txQuery(
-                'UPDATE consumables SET remaining_percentage = remaining_percentage - ? WHERE id = ?',
-                [usagePct, consumable_id]
             );
             await txQuery(
                 'UPDATE bags SET material_costs = material_costs + ? WHERE id = ?',
@@ -686,6 +691,9 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
         res.json({ success: true, cost_added: cost });
 
     } catch (err) {
+        if (err.code === 'STOCK_INSUFFISANT') {
+            return res.status(400).json({ error: 'Stock insuffisant' });
+        }
         logger.error({ err });
         res.status(500).json({ error: 'Internal server error' });
     }
@@ -833,7 +841,7 @@ app.post('/api/dashboard-lists/reorder', auth, async (req, res) => {
 
 app.get('/api/consumables', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM consumables ORDER BY created_at DESC');
+        const result = await query('SELECT * FROM consumables WHERE deleted_at IS NULL ORDER BY created_at DESC');
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch consumables' });
@@ -843,9 +851,13 @@ app.get('/api/consumables', auth, async (req, res) => {
 app.post('/api/consumables', auth, async (req, res) => {
     try {
         const { name, brand, purchase_price, quantity, unit, remaining_percentage, notes } = req.body;
+        if (!name || name.trim() === '') return res.status(400).json({ error: 'Le nom du produit est obligatoire' });
+        const price = parseFloat(purchase_price) || 0;
+        if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
+        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
         const id = await insertAndGetId(
             'INSERT INTO consumables (name, brand, purchase_price, quantity, unit, remaining_percentage, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, brand, parseFloat(purchase_price) || 0, parseInt(quantity) || 1, unit || 'unité', parseInt(remaining_percentage) || 100, notes]
+            [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes]
         );
         res.json({ id });
     } catch (err) {
@@ -857,9 +869,13 @@ app.put('/api/consumables/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
         const { name, brand, purchase_price, quantity, unit, remaining_percentage, notes } = req.body;
+        if (!name || name.trim() === '') return res.status(400).json({ error: 'Le nom du produit est obligatoire' });
+        const price = parseFloat(purchase_price) || 0;
+        if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
+        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
         await query(
             'UPDATE consumables SET name = ?, brand = ?, purchase_price = ?, quantity = ?, unit = ?, remaining_percentage = ?, notes = ? WHERE id = ?',
-            [name, brand, parseFloat(purchase_price) || 0, parseInt(quantity) || 1, unit || 'unité', parseInt(remaining_percentage) || 100, notes, id]
+            [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -870,7 +886,11 @@ app.put('/api/consumables/:id', auth, async (req, res) => {
 app.delete('/api/consumables/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
-        await query('DELETE FROM consumables WHERE id = ?', [id]);
+        const result = await query(
+            'UPDATE consumables SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
+            [id]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Produit non trouvé' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to delete consumable' });
@@ -879,7 +899,7 @@ app.delete('/api/consumables/:id', auth, async (req, res) => {
 
 app.get('/api/expenses', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM expenses ORDER BY date DESC, created_at DESC');
+        const result = await query('SELECT * FROM expenses WHERE deleted_at IS NULL ORDER BY date DESC, created_at DESC');
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Failed to fetch expenses' });
@@ -889,9 +909,12 @@ app.get('/api/expenses', auth, async (req, res) => {
 app.post('/api/expenses', auth, async (req, res) => {
     try {
         const { description, amount, category, date } = req.body;
+        if (!description || description.trim() === '') return res.status(400).json({ error: 'La description est obligatoire' });
+        const amt = parseFloat(amount) || 0;
+        if (amt < 0) return res.status(400).json({ error: 'Le montant ne peut pas être négatif' });
         const id = await insertAndGetId(
             'INSERT INTO expenses (description, amount, category, date) VALUES (?, ?, ?, ?)',
-            [description, parseFloat(amount) || 0, category || 'other', date || new Date().toISOString().split('T')[0]]
+            [description, amt, category || 'other', date || new Date().toISOString().split('T')[0]]
         );
         res.json({ id });
     } catch (err) {
@@ -916,7 +939,11 @@ app.put('/api/expenses/:id', auth, async (req, res) => {
 app.delete('/api/expenses/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
-        await query('DELETE FROM expenses WHERE id = ?', [id]);
+        const result = await query(
+            'UPDATE expenses SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
+            [id]
+        );
+        if (result.rowCount === 0) return res.status(404).json({ error: 'Dépense non trouvée' });
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Failed to delete expense' });
@@ -931,7 +958,7 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
                  ROUND(SUM(actual_resale_price), 2) as revenue,
                  ROUND(SUM(actual_resale_price - purchase_price - fees - material_costs), 2) as profit
                FROM bags
-               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != ''
+               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != '' AND deleted_at IS NULL
                GROUP BY substr(sale_date, 1, 7)
                ORDER BY month ASC`
             : `SELECT substring(sale_date, 1, 7) as month,
@@ -939,17 +966,17 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
                  ROUND(SUM(actual_resale_price)::numeric, 2) as revenue,
                  ROUND(SUM(actual_resale_price - purchase_price - fees - material_costs)::numeric, 2) as profit
                FROM bags
-               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != ''
+               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != '' AND deleted_at IS NULL
                GROUP BY substring(sale_date, 1, 7)
                ORDER BY month ASC`;
 
         const expensesSql = IS_LOCAL
             ? `SELECT substr(date, 1, 7) as month, ROUND(SUM(amount), 2) as expenses
-               FROM expenses WHERE date IS NOT NULL AND date != ''
+               FROM expenses WHERE date IS NOT NULL AND date != '' AND deleted_at IS NULL
                GROUP BY substr(date, 1, 7)
                ORDER BY month ASC`
             : `SELECT substring(date, 1, 7) as month, ROUND(SUM(amount)::numeric, 2) as expenses
-               FROM expenses WHERE date IS NOT NULL AND date != ''
+               FROM expenses WHERE date IS NOT NULL AND date != '' AND deleted_at IS NULL
                GROUP BY substring(date, 1, 7)
                ORDER BY month ASC`;
 
@@ -985,8 +1012,8 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
 
 app.get('/api/export/csv', auth, async (req, res) => {
     try {
-        const bagsRes = await query('SELECT * FROM bags WHERE status = ?', ['sold']);
-        const expensesRes = await query('SELECT * FROM expenses');
+        const bagsRes = await query('SELECT * FROM bags WHERE status = ? AND deleted_at IS NULL', ['sold']);
+        const expensesRes = await query('SELECT * FROM expenses WHERE deleted_at IS NULL');
         const bags = bagsRes.rows;
         const expenses = expensesRes.rows;
 
