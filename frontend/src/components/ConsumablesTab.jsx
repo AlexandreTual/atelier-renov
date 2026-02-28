@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { Plus, Trash2, Edit2, Package, AlertTriangle } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { confirm } from './ConfirmDialog'
 
 const LOW_STOCK_THRESHOLD = 20
 
@@ -62,7 +63,7 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
     }
 
     const handleDelete = async (id) => {
-        if (!confirm('Supprimer ce produit ?')) return
+        if (!await confirm('Supprimer ce produit ?')) return
         try {
             const resp = await authenticatedFetch(`/api/consumables/${id}`, { method: 'DELETE' })
             if (resp.ok) {

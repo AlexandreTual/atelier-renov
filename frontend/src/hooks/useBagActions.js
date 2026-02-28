@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { toast } from 'react-hot-toast';
+import { confirm } from '../components/ConfirmDialog';
 
 export const useBagActions = (authenticatedFetch, onSuccess) => {
 
@@ -110,7 +111,7 @@ export const useBagActions = (authenticatedFetch, onSuccess) => {
     }, [authenticatedFetch, onSuccess]);
 
     const handleDelete = useCallback(async (id, closeModal) => {
-        if (!confirm('Supprimer cet article ?')) return;
+        if (!await confirm('Supprimer cet article ? Cette action est irréversible.')) return;
         try {
             const resp = await authenticatedFetch(`/api/bags/${id}`, { method: 'DELETE' });
             if (resp.ok) {

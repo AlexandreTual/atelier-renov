@@ -6,6 +6,7 @@ import Header from './components/Header'
 import StatCard from './components/StatCard'
 import BagCard from './components/BagCard'
 import SkeletonCard from './components/SkeletonCard'
+import { ConfirmDialog } from './components/ConfirmDialog'
 import BagModal from './components/BagModal'
 import Login from './components/Login'
 import DashboardListModal from './components/DashboardListModal'
@@ -112,6 +113,7 @@ function App() {
   return (
     <div className="app-container">
       <Toaster position="top-right" />
+      <ConfirmDialog />
       <Sidebar onLogout={logout} />
 
       <main className="main-content">

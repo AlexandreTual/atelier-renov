@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { toast } from 'react-hot-toast';
+import { confirm } from '../components/ConfirmDialog';
 
 export const useDashboardListActions = (authenticatedFetch, onSuccess) => {
     const handleSaveList = useCallback(async (listData, setShowListModal) => {
@@ -26,7 +27,7 @@ export const useDashboardListActions = (authenticatedFetch, onSuccess) => {
     }, [authenticatedFetch, onSuccess]);
 
     const handleDeleteList = useCallback(async (id, setShowListModal) => {
-        if (!confirm('Supprimer cette liste ?')) return;
+        if (!await confirm('Supprimer cette liste ?')) return;
         try {
             const resp = await authenticatedFetch(`/api/dashboard-lists/${id}`, { method: 'DELETE' });
             if (resp.ok) {

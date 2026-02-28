@@ -208,6 +208,7 @@ function BagModal({
                                                 src={img.url}
                                                 style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                                 alt="Before"
+                                                loading="lazy"
                                                 onClick={() => setViewImage(img)}
                                             />
                                             <button type="button" onClick={(e) => { e.stopPropagation(); onImageDelete(img); }} style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', padding: '2px', cursor: 'pointer' }}><X size={12} /></button>
@@ -259,6 +260,7 @@ function BagModal({
                                             src={img.url}
                                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                             alt="Other"
+                                            loading="lazy"
                                             onClick={() => setViewImage(img)}
                                         />
                                         <button type="button" onClick={(e) => { e.stopPropagation(); onImageDelete(img); }} style={{ position: 'absolute', top: 0, right: 0, background: 'rgba(0,0,0,0.5)', color: 'white', border: 'none', padding: '2px', cursor: 'pointer' }}><X size={12} /></button>

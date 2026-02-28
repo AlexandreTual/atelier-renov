@@ -4,6 +4,7 @@ import { toast } from 'react-hot-toast'
 import StatCard from './StatCard'
 import PerformanceChart from './PerformanceChart'
 import { calculateProfit } from '../utils/finance'
+import { confirm } from './ConfirmDialog'
 
 function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
@@ -39,7 +40,7 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     }
 
     const handleDelete = async (id) => {
-        if (!confirm('Supprimer cette dépense ?')) return
+        if (!await confirm('Supprimer cette dépense ?')) return
         try {
             const resp = await authenticatedFetch(`/api/expenses/${id}`, { method: 'DELETE' })
             if (resp.ok) {
