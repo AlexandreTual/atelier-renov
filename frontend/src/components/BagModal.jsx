@@ -407,23 +407,39 @@ function BagModal({
                         </>
                     )}
 
-                    {SELLING_STATUSES.includes(formData.status) && (
+                    {(SELLING_STATUSES.includes(formData.status) || formData.status === 'sold') && (
                         <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: '8px', padding: '1rem', marginBottom: '1rem' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
                                 <span style={{ fontWeight: '600', fontSize: '0.9rem', color: '#0369a1' }}>Mise en vente</span>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const text = generateVintedDescription(formData)
-                                        navigator.clipboard.writeText(text)
-                                            .then(() => toast.success('Description copiée !'))
-                                            .catch(() => toast.error('Erreur de copie'))
-                                    }}
-                                    className="btn-secondary"
-                                    style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
-                                >
-                                    <Clipboard size={14} /> Copier fiche Vinted
-                                </button>
+                                {SELLING_STATUSES.includes(formData.status) && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const text = generateVintedDescription(formData)
+                                            const fallbackCopy = () => {
+                                                const ta = document.createElement('textarea')
+                                                ta.value = text
+                                                ta.style.cssText = 'position:fixed;opacity:0'
+                                                document.body.appendChild(ta)
+                                                ta.select()
+                                                try { document.execCommand('copy'); toast.success('Description copiée !') }
+                                                catch { toast.error('Erreur de copie') }
+                                                document.body.removeChild(ta)
+                                            }
+                                            if (navigator.clipboard) {
+                                                navigator.clipboard.writeText(text)
+                                                    .then(() => toast.success('Description copiée !'))
+                                                    .catch(fallbackCopy)
+                                            } else {
+                                                fallbackCopy()
+                                            }
+                                        }}
+                                        className="btn-secondary"
+                                        style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', padding: '0.4rem 0.75rem' }}
+                                    >
+                                        <Clipboard size={14} /> Copier fiche Vinted
+                                    </button>
+                                )}
                             </div>
                             <div className="form-group" style={{ marginBottom: 0 }}>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>

@@ -266,6 +266,11 @@ function App() {
                   </div>
                 ) : (
                   <>
+                    {(searchTerm || brandFilter !== 'all' || statusFilter !== 'all' || itemTypeFilter !== 'all') && (
+                      <div style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
+                        {filtered.length} article{filtered.length !== 1 ? 's' : ''} trouvé{filtered.length !== 1 ? 's' : ''}
+                      </div>
+                    )}
                     <div className="inventory-grid">
                       {filtered.slice(inventoryPage * PAGE_SIZE, (inventoryPage + 1) * PAGE_SIZE).map(bag => (
                         <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />

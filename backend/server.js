@@ -81,7 +81,7 @@ app.use(express.json());
 
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
-app.use(pinoHttp({ logger }));
+app.use(pinoHttp({ logger, redact: ['req.headers.authorization'] }));
 
 // Serve local uploads if in local mode
 if (IS_LOCAL) {
@@ -399,6 +399,7 @@ async function setupDb() {
         await query('CREATE INDEX IF NOT EXISTS idx_bag_consumables_consumable_id ON bag_consumables(consumable_id)');
         await query('CREATE INDEX IF NOT EXISTS idx_bags_status ON bags(status)');
         await query('CREATE INDEX IF NOT EXISTS idx_bags_brand ON bags(brand)');
+        await query('CREATE INDEX IF NOT EXISTS idx_bags_created_at ON bags(created_at)');
 
         const brandsCount = await query('SELECT COUNT(*) as count FROM brands');
         const count = brandsCount.rows[0].count;
@@ -448,9 +449,14 @@ const auth = (req, res, next) => {
 };
 
 const validateBag = (req, res, next) => {
-    const { name, purchase_price, target_resale_price } = req.body;
+    const { name, purchase_price, target_resale_price, listing_url } = req.body;
     if (!name || name.trim() === '') {
         return res.status(400).json({ error: 'Le nom du modèle est obligatoire' });
+    }
+    if (listing_url && listing_url.trim() !== '') {
+        try { new URL(listing_url); } catch {
+            return res.status(400).json({ error: 'L\'URL de l\'annonce n\'est pas valide' });
+        }
     }
     req.body.purchase_price = parseFloat(purchase_price) || 0;
     req.body.target_resale_price = parseFloat(target_resale_price) || 0;
@@ -491,10 +497,10 @@ app.post('/api/login', loginLimiter, async (req, res) => {
         const user = result.rows[0];
 
         if (user && await bcrypt.compare(password, user.password)) {
-            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '7d' });
+            const token = jwt.sign({ id: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
             return res.json({ token });
         }
-        res.status(401).json({ error: 'Mot de passe incorrect' });
+        res.status(401).json({ error: 'Identifiants invalides' });
     } catch (err) {
         logger.error({ err });
         res.status(500).json({ error: 'Erreur lors de la connexion' });
@@ -1011,6 +1017,14 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
     }
 });
 
+function csvEscape(value) {
+    const str = String(value ?? '');
+    if (/^[=+\-@]/.test(str) || str.includes(';') || str.includes('"') || str.includes('\n')) {
+        return '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+}
+
 app.get('/api/export/csv', auth, async (req, res) => {
     try {
         const bagsRes = await query('SELECT * FROM bags WHERE status = ? AND deleted_at IS NULL', ['sold']);
@@ -1022,11 +1036,11 @@ app.get('/api/export/csv', auth, async (req, res) => {
 
         bags.forEach(b => {
             const margin = b.actual_resale_price - b.purchase_price - b.fees - b.material_costs;
-            csv += `Vente;${b.sale_date || b.created_at};${b.brand} ${b.name};${b.actual_resale_price};${margin.toFixed(2)}\n`;
+            csv += `Vente;${csvEscape(b.sale_date || b.created_at)};${csvEscape((b.brand || '') + ' ' + (b.name || ''))};${b.actual_resale_price};${margin.toFixed(2)}\n`;
         });
 
         expenses.forEach(e => {
-            csv += `Dépense;${e.date};${e.description};-${e.amount};0\n`;
+            csv += `Dépense;${csvEscape(e.date)};${csvEscape(e.description)};-${e.amount};0\n`;
         });
 
         res.setHeader('Content-Type', 'text/csv');
@@ -1095,6 +1109,12 @@ app.put('/api/brands/:id', auth, async (req, res) => {
 
 app.delete('/api/brands/:id', auth, async (req, res) => {
     try {
+        const brandResult = await query('SELECT name FROM brands WHERE id = ?', [req.params.id]);
+        if (brandResult.rows.length === 0) return res.status(404).json({ error: 'Marque non trouvée' });
+        const brandName = brandResult.rows[0].name;
+        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE brand = ? AND deleted_at IS NULL', [brandName]);
+        const count = parseInt(usageResult.rows[0].count) || 0;
+        if (count > 0) return res.status(409).json({ error: `Cette marque est utilisée par ${count} article(s). Supprimez ou modifiez ces articles d'abord.` });
         await query('DELETE FROM brands WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
@@ -1115,6 +1135,12 @@ app.put('/api/item-types/:id', auth, async (req, res) => {
 
 app.delete('/api/item-types/:id', auth, async (req, res) => {
     try {
+        const typeResult = await query('SELECT name FROM item_types WHERE id = ?', [req.params.id]);
+        if (typeResult.rows.length === 0) return res.status(404).json({ error: 'Type non trouvé' });
+        const typeName = typeResult.rows[0].name;
+        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE item_type = ? AND deleted_at IS NULL', [typeName]);
+        const count = parseInt(usageResult.rows[0].count) || 0;
+        if (count > 0) return res.status(409).json({ error: `Ce type est utilisé par ${count} article(s). Supprimez ou modifiez ces articles d'abord.` });
         await query('DELETE FROM item_types WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
