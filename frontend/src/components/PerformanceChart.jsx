@@ -27,7 +27,25 @@ function PerformanceChart({ authenticatedFetch }) {
     useEffect(() => { fetchStats() }, [fetchStats])
 
     if (loading) return (
-        <div style={{ textAlign: 'center', padding: '2rem', color: '#999' }}>Chargement...</div>
+        <div style={{ marginTop: '2rem', background: 'white', border: '1px solid #eee', borderRadius: '12px', padding: '1.5rem' }}>
+            <div className="skeleton" style={{ height: '20px', width: '200px', marginBottom: '1.5rem' }} />
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '4px', height: '140px', marginBottom: '1rem' }}>
+                {[70, 45, 85, 55, 90, 60].map((h, i) => (
+                    <div key={i} style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: '2px' }}>
+                        <div className="skeleton" style={{ flex: 1, height: `${h}%`, borderRadius: '3px 3px 0 0' }} />
+                        <div className="skeleton" style={{ flex: 1, height: `${h * 0.5}%`, borderRadius: '3px 3px 0 0' }} />
+                    </div>
+                ))}
+            </div>
+            {[1, 2, 3].map(i => (
+                <div key={i} style={{ display: 'flex', gap: '1rem', marginBottom: '0.5rem' }}>
+                    <div className="skeleton" style={{ height: '14px', width: '60px' }} />
+                    <div className="skeleton" style={{ height: '14px', flex: 1 }} />
+                    <div className="skeleton" style={{ height: '14px', flex: 1 }} />
+                    <div className="skeleton" style={{ height: '14px', flex: 1 }} />
+                </div>
+            ))}
+        </div>
     )
 
     if (data.length === 0) return (

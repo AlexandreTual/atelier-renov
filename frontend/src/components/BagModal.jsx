@@ -402,7 +402,7 @@ function BagModal({
                                 onUpdateCost={(costDiff) => {
                                     setFormData(prev => ({
                                         ...prev,
-                                        material_costs: Math.max(0, (prev.material_costs || 0) + costDiff)
+                                        material_costs: Math.max(0, parseFloat(prev.material_costs || 0) + costDiff)
                                     }));
                                 }}
                             />

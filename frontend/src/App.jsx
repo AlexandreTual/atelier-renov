@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import StatCard from './components/StatCard'
 import BagCard from './components/BagCard'
+import SkeletonCard from './components/SkeletonCard'
 import BagModal from './components/BagModal'
 import Login from './components/Login'
 import DashboardListModal from './components/DashboardListModal'
@@ -123,10 +124,21 @@ function App() {
           <Route path="/dashboard" element={
             <section className="dashboard">
               <div className="stats-grid">
-                <StatCard label="Bénéfice Réalisé" value={`${totalProfit.toFixed(2)} €`} className="profit" />
-                <StatCard label="En cours de soin" value={activeRenovations} />
-                <StatCard label="Valeur Stock (Est.)" value={`${stockValueEst.toFixed(2)} €`} />
-                <StatCard label="Capital Immobilisé" value={`${capitalImmobilized.toFixed(2)} €`} style={{ color: 'var(--accent-brown)' }} />
+                {isLoading ? (
+                  Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="stat-card" style={{ padding: '1.5rem' }}>
+                      <div className="skeleton" style={{ height: '12px', width: '60%', marginBottom: '0.75rem' }} />
+                      <div className="skeleton" style={{ height: '28px', width: '50%' }} />
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    <StatCard label="Bénéfice Réalisé" value={`${totalProfit.toFixed(2)} €`} className="profit" />
+                    <StatCard label="En cours de soin" value={activeRenovations} />
+                    <StatCard label="Valeur Stock (Est.)" value={`${stockValueEst.toFixed(2)} €`} />
+                    <StatCard label="Capital Immobilisé" value={`${capitalImmobilized.toFixed(2)} €`} style={{ color: 'var(--accent-brown)' }} />
+                  </>
+                )}
               </div>
 
               <div style={{ marginTop: '3rem' }}>
@@ -143,7 +155,14 @@ function App() {
                   </button>
                 </div>
 
-                {dashboardLists.length === 0 && (
+                {isLoading ? (
+                  <div style={{ marginBottom: '3rem' }}>
+                    <div className="skeleton" style={{ height: '20px', width: '180px', marginBottom: '1rem' }} />
+                    <div className="inventory-grid">
+                      {Array.from({ length: 3 }).map((_, i) => <SkeletonCard key={i} />)}
+                    </div>
+                  </div>
+                ) : dashboardLists.length === 0 && (
                   <div style={{ textAlign: 'center', padding: '3rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
                     <p>Vous n'avez pas encore de listes personnalisées.</p>
                     <button onClick={() => { setSelectedList(null); setShowListModal(true); }} style={{ marginTop: '1rem', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
@@ -217,7 +236,9 @@ function App() {
                 </select>
               </div>
               {isLoading ? (
-                <div style={{ textAlign: 'center', padding: '4rem', color: '#999' }}>Chargement...</div>
+                <div className="inventory-grid">
+                  {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
+                </div>
               ) : (() => {
                 const filtered = bags
                   .filter(bag => {

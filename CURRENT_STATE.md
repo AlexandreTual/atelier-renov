@@ -1,25 +1,25 @@
 # État Actuel du Projet - Atelier Rénov'
 
-Dernière mise à jour : 2026-02-23
+Dernière mise à jour : 2026-02-28
 
 ---
 
 ## 🔄 Session en cours
 
 **Branche active :** `feat/phase2-performance-charts`
-**Dernier commit :** `7edd309` — feat: add monthly performance chart (#50)
 
-### Ce qui vient d'être fait
-- Graphique de performance mensuelle (CA + marges) avec Recharts — PR #50 mergée
-- Phase 1 quick wins : alertes stocks bas, persistance filtres (localStorage), indicateurs ROI/marge par article
-- Config Claude Code ajoutée au repo (CLAUDE.md + .claude/settings.json) — PR #51 en cours
+### Ce qui vient d'être fait (Phase 2 — complète)
+- Graphique de performance mensuelle (CA + marges + dépenses) — #50
+- Phase 1 quick wins : alertes stocks, persistance filtres, indicateurs ROI/marge — #49
+- Config Claude Code (CLAUDE.md + .claude/settings.json) — #51
+- SaaS roadmap ajouté — #52
+- Générateur de fiche Vinted + lien annonce (listing_url) — #54
+- Skeletons animés (inventory, dashboard, graphique) + fix bug NaN material_costs — en cours
 
 ### Prochaines étapes
-1. Continuer la **phase 2** depuis le backlog (ROADMAP.md — section "Business & Analyse")
-   - Générateur de fiche Vinted
-   - Liaison matières → déduction automatique coût consommables
-   - Skeletons / états de chargement élégants
-2. Merger la PR #51 (claude-config) si pas encore fait
+1. **Merger la PR Phase 2** (feat/phase2-performance-charts → master)
+2. Backlog non planifié : Recherche Avancée, Mode Sombre
+3. SaaS : multi-tenancy, auth, Stripe (voir ROADMAP.md)
 
 ---
 

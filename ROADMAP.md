@@ -75,21 +75,25 @@
 
 ---
 
-## 💡 Fonctionnalités futures (backlog)
+## ✅ Phase 2 — Fonctionnalités Business & UX (terminé)
 
 ### Atelier & Rénovation
-- [ ] **Liaison Matières** : déduire automatiquement le coût des consommables d'un article
-- [ ] **Générateur de Fiche Vinted** : copier une description optimisée pour la vente
+- [x] **Liaison Matières** : déduire automatiquement le coût des consommables d'un article
+- [x] **Générateur de Fiche Vinted** : copier une description optimisée pour la vente
 
 ### Business & Analyse
-- [ ] **Graphiques de Performance** : vue mensuelle CA et marges (Recharts)
-- [ ] **Indicateurs de Rentabilité** : ROI et marge % par article
-- [ ] **Gestion des Listings** : liens vers annonces Vinted, Vestiaire Collective
-- [ ] **Alertes Stocks** : notification visuelle si consommable presque vide
+- [x] **Graphiques de Performance** : vue mensuelle CA et marges (custom chart)
+- [x] **Indicateurs de Rentabilité** : ROI et marge % par article (BagCard + BagModal)
+- [x] **Gestion des Listings** : lien vers annonce Vinted / Vestiaire (listing_url)
+- [x] **Alertes Stocks** : bandeau + badge sur consommable < 20%
 
 ### UX
-- [ ] **Skeletons** : états de chargement élégants
-- [ ] **Persistance des filtres** : localStorage pour survivre au refresh
+- [x] **Skeletons** : états de chargement animés (inventory, dashboard, graphique)
+- [x] **Persistance des filtres** : localStorage (recherche, marque, statut, type, tri)
+
+## 💡 Backlog (non planifié)
+
+### UX
 - [ ] **Recherche Avancée** : plage de prix, date, rentabilité
 - [ ] **Mode Sombre**
 
