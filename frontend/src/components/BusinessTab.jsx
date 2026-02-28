@@ -3,9 +3,11 @@ import { Plus, Trash2, Download, Calculator, TrendingUp, TrendingDown } from 'lu
 import { toast } from 'react-hot-toast'
 import StatCard from './StatCard'
 import PerformanceChart from './PerformanceChart'
+import { calculateProfit } from '../utils/finance'
 
 function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
+    const [exporting, setExporting] = useState(false)
     const [formData, setFormData] = useState({
         description: '',
         amount: 0,
@@ -52,6 +54,8 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
     }
 
     const exportCSV = async () => {
+        if (exporting) return
+        setExporting(true)
         const loadingToast = toast.loading('Export en cours...')
         try {
             const resp = await authenticatedFetch('/api/export/csv')
@@ -72,14 +76,15 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
         } catch (err) {
             console.error('Failed to export CSV', err)
             toast.error('Échec de l\'export', { id: loadingToast })
+        } finally {
+            setExporting(false)
         }
     }
 
     // Calculations
-    const totalSales = bags.reduce((acc, b) => b.status === 'sold' ? acc + b.actual_resale_price : acc, 0)
-    const bagCosts = bags.reduce((acc, b) => b.status === 'sold' ? acc + b.purchase_price + (b.fees || 0) + (b.material_costs || 0) : acc, 0)
+    const totalSales = bags.reduce((acc, b) => b.status === 'sold' ? acc + (parseFloat(b.actual_resale_price) || 0) : acc, 0)
     const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0)
-    const netProfit = totalSales - bagCosts - totalExpenses
+    const netProfit = bags.filter(b => b.status === 'sold').reduce((acc, b) => acc + calculateProfit(b), 0) - totalExpenses
 
     return (
         <section>
@@ -88,8 +93,8 @@ function BusinessTab({ expenses, bags, fetchExpenses, authenticatedFetch }) {
                     <Calculator size={24} /> Pilotage Business
                 </h2>
                 <div style={{ display: 'flex', gap: '1rem' }}>
-                    <button onClick={exportCSV} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                        <Download size={20} /> Exporter CSV
+                    <button onClick={exportCSV} className="btn-secondary" disabled={exporting} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <Download size={20} /> {exporting ? 'Export...' : 'Exporter CSV'}
                     </button>
                     <button onClick={() => setShowModal(true)} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <Plus size={20} /> Nouvelle dépense

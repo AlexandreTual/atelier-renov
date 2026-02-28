@@ -5,6 +5,7 @@ import BeforeAfterSlider from './BeforeAfterSlider'
 import BagLog from './BagLog'
 import BagConsumables from './BagConsumables'
 import { STATUSES } from '../constants'
+import { calculateProfit, calculateMargin } from '../utils/finance'
 
 const SELLING_STATUSES = ['ready_for_sale', 'selling']
 
@@ -63,8 +64,12 @@ function BagModal({
         setUploading(true)
         try {
             await onImageAdd(file, type)
+        } catch (err) {
+            console.error('Image upload failed', err)
+            toast.error('Échec de l\'upload — les données du formulaire sont conservées')
         } finally {
             setUploading(false)
+            e.target.value = ''
         }
     }
 
@@ -287,17 +292,9 @@ function BagModal({
                     </div>
 
                     {(() => {
-                        const purchase = parseFloat(formData.purchase_price) || 0
-                        const target = parseFloat(formData.target_resale_price) || 0
-                        const material = parseFloat(formData.material_costs) || 0
-                        const fees = parseFloat(formData.fees) || 0
-                        const actual = parseFloat(formData.actual_resale_price) || 0
                         const isSold = formData.status === 'sold'
-                        const profit = isSold
-                            ? actual - purchase - fees - material
-                            : target - purchase - material
-                        const costBase = purchase + material
-                        const marginPct = costBase > 0 ? (profit / costBase * 100) : null
+                        const profit = calculateProfit(formData)
+                        const marginPct = calculateMargin(profit, formData)
                         const color = profit >= 0 ? '#2ecc71' : '#e74c3c'
                         return (
                             <div style={{ background: profit >= 0 ? '#eafaf1' : '#fdedec', borderRadius: '8px', padding: '0.6rem 1rem', marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

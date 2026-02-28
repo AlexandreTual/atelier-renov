@@ -1,15 +1,12 @@
 import React from 'react'
 import { ImageIcon, ExternalLink } from 'lucide-react'
 import { STATUSES } from '../constants'
+import { calculateProfit, calculateMargin } from '../utils/finance'
 
 function BagCard({ bag, onClick }) {
   const currentStatus = STATUSES[bag.status] || STATUSES.to_be_cleaned
-  const profit = bag.status === 'sold'
-    ? ((bag.actual_resale_price || 0) - (bag.purchase_price || 0) - (bag.fees || 0) - (bag.material_costs || 0))
-    : ((bag.target_resale_price || 0) - (bag.purchase_price || 0) - (bag.material_costs || 0))
-
-  const costBase = (bag.purchase_price || 0) + (bag.material_costs || 0)
-  const marginPct = costBase > 0 ? (profit / costBase * 100) : null
+  const profit = calculateProfit(bag)
+  const marginPct = calculateMargin(profit, bag)
 
   const mainImage = bag.images && bag.images.length > 0 ? bag.images[0].url : null
 
@@ -88,4 +85,4 @@ function BagCard({ bag, onClick }) {
   )
 }
 
-export default BagCard
+export default React.memo(BagCard)
