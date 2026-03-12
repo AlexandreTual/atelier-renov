@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import { Clock, Plus, Settings, ChevronUp, ChevronDown } from 'lucide-react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
@@ -16,7 +16,6 @@ import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
 import { Toaster } from 'react-hot-toast'
 import { STATUSES } from './constants'
-import { calculateProfit } from './utils/finance'
 
 const PAGE_SIZE = 50
 
@@ -31,9 +30,11 @@ import { useItemTypeActions } from './hooks/useItemTypeActions'
 function App() {
   const { token, authenticatedFetch, login, logout } = useAuth()
   const {
-    bags, dashboardLists, setDashboardLists, consumables, expenses, brands, itemTypes,
-    fetchBags, fetchDashboardLists, fetchConsumables, fetchExpenses, fetchBrands, fetchItemTypes, fetchAll,
-    isLoading
+    bags, bagTotal, bagStats, dashboardBags,
+    dashboardLists, setDashboardLists, consumables, expenses, brands, itemTypes,
+    fetchBags, fetchBagStats, fetchDashboardBags, fetchDashboardLists,
+    fetchConsumables, fetchExpenses, fetchBrands, fetchItemTypes, fetchAll,
+    isLoading,
   } = useProjectData(authenticatedFetch)
 
   // UI state
@@ -53,11 +54,31 @@ function App() {
   const [showListModal, setShowListModal] = useState(false)
   const [selectedList, setSelectedList] = useState(null)
 
-  useEffect(() => { localStorage.setItem('inv_search', searchTerm); setInventoryPage(0) }, [searchTerm])
-  useEffect(() => { localStorage.setItem('inv_brand', brandFilter); setInventoryPage(0) }, [brandFilter])
-  useEffect(() => { localStorage.setItem('inv_status', statusFilter); setInventoryPage(0) }, [statusFilter])
-  useEffect(() => { localStorage.setItem('inv_type', itemTypeFilter); setInventoryPage(0) }, [itemTypeFilter])
-  useEffect(() => { localStorage.setItem('inv_sort', sortBy); setInventoryPage(0) }, [sortBy])
+  const searchDebounce = useRef(null)
+
+  // Persist filter state
+  useEffect(() => { localStorage.setItem('inv_brand',  brandFilter) },  [brandFilter])
+  useEffect(() => { localStorage.setItem('inv_status', statusFilter) }, [statusFilter])
+  useEffect(() => { localStorage.setItem('inv_type',   itemTypeFilter) }, [itemTypeFilter])
+  useEffect(() => { localStorage.setItem('inv_sort',   sortBy) },        [sortBy])
+
+  // Refetch when non-search filters / sort / page change
+  useEffect(() => {
+    if (!token) return
+    fetchBags({ search: searchTerm, brand: brandFilter, status: statusFilter, type: itemTypeFilter, sort: sortBy, page: inventoryPage, limit: PAGE_SIZE })
+  }, [brandFilter, statusFilter, itemTypeFilter, sortBy, inventoryPage, token]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Debounce search — reset page then refetch
+  useEffect(() => {
+    localStorage.setItem('inv_search', searchTerm)
+    if (!token) return
+    clearTimeout(searchDebounce.current)
+    searchDebounce.current = setTimeout(() => {
+      setInventoryPage(0)
+      fetchBags({ search: searchTerm, brand: brandFilter, status: statusFilter, type: itemTypeFilter, sort: sortBy, page: 0, limit: PAGE_SIZE })
+    }, 300)
+    return () => clearTimeout(searchDebounce.current)
+  }, [searchTerm]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Actions
   const { handleImageAdd, handleImageDelete, handleSubmit, handleDelete } = useBagActions(authenticatedFetch, fetchBags)
@@ -66,9 +87,7 @@ function App() {
   const { handleAddItemType } = useItemTypeActions(authenticatedFetch, fetchItemTypes)
 
   useEffect(() => {
-    if (token) {
-      fetchAll()
-    }
+    if (token) fetchAll()
   }, [token, fetchAll])
 
   const openModal = (bag = null) => {
@@ -100,12 +119,7 @@ function App() {
     setSelectedBag(null)
   }
 
-  // Stats calculations
-  const totalProfit = bags.reduce((acc, bag) => bag.status === 'sold' ? acc + calculateProfit(bag) : acc, 0)
-
-  const activeRenovations = bags.filter(b => ['cleaning', 'repairing', 'drying'].includes(b.status)).length
-  const stockValueEst = bags.filter(b => b.status !== 'sold').reduce((acc, b) => acc + (b.target_resale_price || 0), 0)
-  const capitalImmobilized = bags.filter(b => b.status !== 'sold').reduce((acc, b) => acc + (b.purchase_price || 0) + (b.material_costs || 0), 0)
+  const { totalProfit, activeRenovations, stockValueEst, capitalImmobilized } = bagStats
 
   if (!token) {
     return (
@@ -182,7 +196,7 @@ function App() {
                 )}
 
                 {dashboardLists.map((list, index) => {
-                  const filteredBags = bags.filter(b => list.filters.includes(b.status))
+                  const filteredBags = dashboardBags.filter(b => list.filters.includes(b.status))
                   return (
                     <div key={list.id} style={{ marginBottom: '3rem' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
@@ -249,71 +263,56 @@ function App() {
                 <div className="inventory-grid">
                   {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
                 </div>
-              ) : (() => {
-                const filtered = bags
-                  .filter(bag => {
-                    const matchSearch = bag.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                      (bag.brand && bag.brand.toLowerCase().includes(searchTerm.toLowerCase()));
-                    const matchBrand = brandFilter === 'all' || bag.brand === brandFilter;
-                    const matchStatus = statusFilter === 'all' || bag.status === statusFilter;
-                    const matchType = itemTypeFilter === 'all' || bag.item_type === itemTypeFilter;
-                    return matchSearch && matchBrand && matchStatus && matchType;
-                  })
-                  .sort((a, b) => {
-                    if (sortBy === 'brand') return (a.brand || '').localeCompare(b.brand || '');
-                    if (sortBy === 'price_asc') return (a.purchase_price || 0) - (b.purchase_price || 0);
-                    if (sortBy === 'price_desc') return (b.purchase_price || 0) - (a.purchase_price || 0);
-                    if (sortBy === 'date_asc') return new Date(a.created_at) - new Date(b.created_at);
-                    return new Date(b.created_at) - new Date(a.created_at); // date_desc default
-                  });
-                return filtered.length === 0 ? (
-                  <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
-                    <p>{bags.length === 0 ? 'Aucun article dans l\'inventaire.' : 'Aucun article ne correspond aux filtres sélectionnés.'}</p>
-                    {bags.length === 0 && (
-                      <button onClick={() => openModal()} style={{ marginTop: '1rem', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                        Ajouter mon premier article
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <>
-                    {(searchTerm || brandFilter !== 'all' || statusFilter !== 'all' || itemTypeFilter !== 'all') && (
-                      <div style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
-                        {filtered.length} article{filtered.length !== 1 ? 's' : ''} trouvé{filtered.length !== 1 ? 's' : ''}
-                      </div>
-                    )}
-                    <div className="inventory-grid">
-                      {filtered.slice(inventoryPage * PAGE_SIZE, (inventoryPage + 1) * PAGE_SIZE).map(bag => (
-                        <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />
-                      ))}
+              ) : bags.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
+                  <p>{bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all'
+                    ? "Aucun article dans l'inventaire."
+                    : 'Aucun article ne correspond aux filtres sélectionnés.'}
+                  </p>
+                  {bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all' && (
+                    <button onClick={() => openModal()} style={{ marginTop: '1rem', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
+                      Ajouter mon premier article
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {(searchTerm || brandFilter !== 'all' || statusFilter !== 'all' || itemTypeFilter !== 'all') && (
+                    <div style={{ fontSize: '0.85rem', color: '#888', marginBottom: '0.75rem' }}>
+                      {bagTotal} article{bagTotal !== 1 ? 's' : ''} trouvé{bagTotal !== 1 ? 's' : ''}
                     </div>
-                    {filtered.length > PAGE_SIZE && (
-                      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' }}>
-                        <button
-                          onClick={() => setInventoryPage(p => p - 1)}
-                          disabled={inventoryPage === 0}
-                          className="btn-secondary"
-                          style={{ padding: '0.5rem 1.25rem' }}
-                        >
-                          ← Précédent
-                        </button>
-                        <span style={{ color: '#666', fontSize: '0.9rem' }}>
-                          Page {inventoryPage + 1} / {Math.ceil(filtered.length / PAGE_SIZE)}
-                          <span style={{ marginLeft: '0.5rem', color: '#aaa' }}>({filtered.length} articles)</span>
-                        </span>
-                        <button
-                          onClick={() => setInventoryPage(p => p + 1)}
-                          disabled={(inventoryPage + 1) * PAGE_SIZE >= filtered.length}
-                          className="btn-secondary"
-                          style={{ padding: '0.5rem 1.25rem' }}
-                        >
-                          Suivant →
-                        </button>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
+                  )}
+                  <div className="inventory-grid">
+                    {bags.map(bag => (
+                      <BagCard key={bag.id} bag={bag} onClick={() => openModal(bag)} />
+                    ))}
+                  </div>
+                  {bagTotal > PAGE_SIZE && (
+                    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', marginTop: '1.5rem' }}>
+                      <button
+                        onClick={() => setInventoryPage(p => p - 1)}
+                        disabled={inventoryPage === 0}
+                        className="btn-secondary"
+                        style={{ padding: '0.5rem 1.25rem' }}
+                      >
+                        ← Précédent
+                      </button>
+                      <span style={{ color: '#666', fontSize: '0.9rem' }}>
+                        Page {inventoryPage + 1} / {Math.ceil(bagTotal / PAGE_SIZE)}
+                        <span style={{ marginLeft: '0.5rem', color: '#aaa' }}>({bagTotal} articles)</span>
+                      </span>
+                      <button
+                        onClick={() => setInventoryPage(p => p + 1)}
+                        disabled={(inventoryPage + 1) * PAGE_SIZE >= bagTotal}
+                        className="btn-secondary"
+                        style={{ padding: '0.5rem 1.25rem' }}
+                      >
+                        Suivant →
+                      </button>
+                    </div>
+                  )}
+                </>
+              )}
             </section>
           } />
 

@@ -742,12 +742,83 @@ async function checkBagOwnership(bagId, userId) {
     return result.rows[0] || null;
 }
 
+const VALID_STATUSES = new Set(['to_be_cleaned','cleaning','repairing','drying','for_sale','sold']);
+const SORT_MAP = {
+    date_desc: 'created_at DESC',
+    date_asc:  'created_at ASC',
+    brand:     'brand ASC',
+    price_asc: 'purchase_price ASC',
+    price_desc:'purchase_price DESC',
+};
+
+app.get('/api/bags/stats', auth, async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT
+                COALESCE(SUM(CASE WHEN status = 'sold'
+                    THEN actual_resale_price - purchase_price - fees - material_costs
+                    ELSE 0 END), 0) as total_profit,
+                COUNT(CASE WHEN status IN ('cleaning','repairing','drying') THEN 1 ELSE NULL END) as active_renovations,
+                COALESCE(SUM(CASE WHEN status != 'sold' THEN target_resale_price ELSE 0 END), 0) as stock_value_est,
+                COALESCE(SUM(CASE WHEN status != 'sold' THEN purchase_price + material_costs ELSE 0 END), 0) as capital_immobilized
+            FROM bags WHERE deleted_at IS NULL AND user_id = ?
+        `, [req.user.id]);
+        const row = result.rows[0];
+        res.json({
+            totalProfit:        parseFloat(row.total_profit)        || 0,
+            activeRenovations:  parseInt(row.active_renovations)    || 0,
+            stockValueEst:      parseFloat(row.stock_value_est)     || 0,
+            capitalImmobilized: parseFloat(row.capital_immobilized) || 0,
+        });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur lors du chargement des statistiques' });
+    }
+});
+
 app.get('/api/bags', auth, async (req, res) => {
     try {
-        const bagsResult = await query('SELECT * FROM bags WHERE deleted_at IS NULL AND user_id = ? ORDER BY created_at DESC', [req.user.id]);
-        const bags = bagsResult.rows;
+        const { search, brand, status, type, sort, page, limit } = req.query;
+        const pageNum  = Math.max(parseInt(page)  || 0, 0);
+        const pageSize = Math.min(parseInt(limit) || 50, 500);
+        const offset   = pageNum * pageSize;
 
-        if (bags.length === 0) return res.json([]);
+        const conditions = ['deleted_at IS NULL', 'user_id = ?'];
+        const params = [req.user.id];
+
+        if (search && search.trim()) {
+            const like = IS_LOCAL ? 'LIKE' : 'ILIKE';
+            conditions.push(`(name ${like} ? OR brand ${like} ?)`);
+            params.push(`%${search.trim()}%`, `%${search.trim()}%`);
+        }
+        if (brand && brand !== 'all') {
+            conditions.push('brand = ?');
+            params.push(brand);
+        }
+        if (status && status !== 'all') {
+            const statuses = status.split(',').filter(s => VALID_STATUSES.has(s));
+            if (statuses.length > 0) {
+                conditions.push(`status IN (${statuses.map(() => '?').join(',')})`);
+                params.push(...statuses);
+            }
+        }
+        if (type && type !== 'all') {
+            conditions.push('item_type = ?');
+            params.push(type);
+        }
+
+        const where   = conditions.join(' AND ');
+        const orderBy = SORT_MAP[sort] || 'created_at DESC';
+
+        const [countResult, bagsResult] = await Promise.all([
+            query(`SELECT COUNT(*) as count FROM bags WHERE ${where}`, params),
+            query(`SELECT * FROM bags WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`, [...params, pageSize, offset]),
+        ]);
+
+        const total = parseInt(countResult.rows[0].count) || 0;
+        const bags  = bagsResult.rows;
+
+        if (bags.length === 0) return res.json({ bags: [], total });
 
         const placeholders = bags.map(() => '?').join(', ');
         const imagesResult = await query(
@@ -761,7 +832,7 @@ app.get('/api/bags', auth, async (req, res) => {
             imagesByBagId[img.bag_id].push(img);
         }
 
-        res.json(bags.map(bag => ({ ...bag, images: imagesByBagId[bag.id] || [] })));
+        res.json({ bags: bags.map(bag => ({ ...bag, images: imagesByBagId[bag.id] || [] })), total });
     } catch (err) {
         logger.error({ err });
         res.status(500).json({ error: 'Internal server error' });

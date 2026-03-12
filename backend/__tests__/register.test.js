@@ -63,6 +63,7 @@ describe('POST /api/register', () => {
             .get('/api/bags')
             .set('Authorization', `Bearer ${token}`);
         expect(bagsRes.status).toBe(200);
-        expect(bagsRes.body).toEqual([]);
+        expect(bagsRes.body.bags).toEqual([]);
+        expect(bagsRes.body.total).toBe(0);
     });
 });

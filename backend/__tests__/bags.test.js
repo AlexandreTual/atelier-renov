@@ -18,13 +18,38 @@ afterAll(async () => {
 const auth = () => ({ Authorization: `Bearer ${token}` });
 
 describe('GET /api/bags', () => {
-    it('returns empty array initially', async () => {
+    it('returns { bags, total } initially empty', async () => {
         const res = await request(app)
             .get('/api/bags')
             .set(auth());
         expect(res.status).toBe(200);
-        expect(Array.isArray(res.body)).toBe(true);
-        expect(res.body.length).toBe(0);
+        expect(res.body).toHaveProperty('bags');
+        expect(res.body).toHaveProperty('total');
+        expect(Array.isArray(res.body.bags)).toBe(true);
+        expect(res.body.total).toBe(0);
+    });
+
+    it('supports search, brand, status, sort and page query params', async () => {
+        // create a bag first
+        await request(app).post('/api/bags').set(auth()).send({ name: 'Speedy 30', brand: 'Louis Vuitton', status: 'cleaning' });
+
+        const res = await request(app)
+            .get('/api/bags?search=Speedy&brand=Louis Vuitton&status=cleaning&sort=date_desc&page=0&limit=10')
+            .set(auth());
+        expect(res.status).toBe(200);
+        expect(res.body.bags.length).toBeGreaterThan(0);
+        expect(res.body.bags[0].name).toBe('Speedy 30');
+    });
+});
+
+describe('GET /api/bags/stats', () => {
+    it('returns aggregate stats', async () => {
+        const res = await request(app).get('/api/bags/stats').set(auth());
+        expect(res.status).toBe(200);
+        expect(res.body).toHaveProperty('totalProfit');
+        expect(res.body).toHaveProperty('activeRenovations');
+        expect(res.body).toHaveProperty('stockValueEst');
+        expect(res.body).toHaveProperty('capitalImmobilized');
     });
 });
 

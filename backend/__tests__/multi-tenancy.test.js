@@ -56,14 +56,15 @@ describe('Isolation — bags', () => {
     it('userA sees their own bag', async () => {
         const res = await request(app).get('/api/bags').set(authA());
         expect(res.status).toBe(200);
-        const ids = res.body.map(b => b.id);
+        const ids = res.body.bags.map(b => b.id);
         expect(ids).toContain(bagIdA);
     });
 
     it('userB sees an empty bag list', async () => {
         const res = await request(app).get('/api/bags').set(authB());
         expect(res.status).toBe(200);
-        expect(res.body).toEqual([]);
+        expect(res.body.bags).toEqual([]);
+        expect(res.body.total).toBe(0);
     });
 
     it('userB cannot GET bag belonging to userA', async () => {
