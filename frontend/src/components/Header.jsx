@@ -30,7 +30,7 @@ function Header({ onAddNew }) {
                 <p style={{ color: 'var(--text-secondary)' }}>{date}</p>
             </div>
             {(location.pathname === '/inventory' || location.pathname === '/dashboard') && (
-                <button className="btn-primary" onClick={onAddNew}>
+                <button className="btn-primary" onClick={onAddNew} data-tour="add-article">
                     <Plus size={20} />
                     Nouvel article
                 </button>

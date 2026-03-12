@@ -14,7 +14,8 @@ import DashboardListModal from './components/DashboardListModal'
 import ConsumablesTab from './components/ConsumablesTab'
 import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
-import OnboardingChecklist from './components/OnboardingChecklist'
+import OnboardingTour from './components/OnboardingTour'
+import OnboardingFloating from './components/OnboardingFloating'
 import { Toaster } from 'react-hot-toast'
 import { STATUSES } from './constants'
 
@@ -54,6 +55,8 @@ function App() {
   const [inventoryPage, setInventoryPage] = useState(0)
   const [showListModal, setShowListModal] = useState(false)
   const [selectedList, setSelectedList] = useState(null)
+  const [showTour, setShowTour] = useState(false)
+  const tourShownRef = React.useRef(false)
 
   const searchDebounce = useRef(null)
 
@@ -93,6 +96,13 @@ function App() {
       fetchMe(token)
     }
   }, [token, fetchAll, fetchMe])
+
+  useEffect(() => {
+    if (user && !user.onboarding_done && !tourShownRef.current) {
+      tourShownRef.current = true
+      setShowTour(true)
+    }
+  }, [user])
 
   const openModal = (bag = null) => {
     if (bag) {
@@ -144,13 +154,35 @@ function App() {
       <Sidebar onLogout={logout} />
 
       <main className="main-content">
-        <OnboardingChecklist
+        {showTour && (
+          <OnboardingTour
+            steps={[
+              {
+                target: null,
+                title: 'Bienvenue sur Atelier Rénov\' !',
+                description: 'Vos marques et types d\'articles sont déjà configurés. Il ne reste plus qu\'une chose à faire : créer votre premier article.',
+                primaryLabel: 'Allons-y',
+              },
+              {
+                target: 'add-article',
+                title: 'Créez votre premier article',
+                description: 'Cliquez ici pour ajouter un sac, une paire de chaussures ou tout autre article à rénover et revendre.',
+                primaryLabel: 'Ajouter un article',
+                onClick: () => openModal(),
+              },
+            ]}
+            onComplete={() => setShowTour(false)}
+            onSkip={() => setShowTour(false)}
+          />
+        )}
+        <OnboardingFloating
           user={user}
           brands={brands}
           itemTypes={itemTypes}
           bagTotal={bagTotal}
           onDismiss={markOnboardingDone}
           onNewArticle={() => openModal()}
+          onStartTour={() => setShowTour(true)}
         />
         <Header onAddNew={() => openModal()} />
 
