@@ -12,6 +12,8 @@ const stream = require('stream');
 const pino = require('pino');
 const pinoHttp = require('pino-http');
 
+const crypto = require('crypto');
+
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 // --- Dual Mode Config ---
@@ -35,6 +37,8 @@ const PORT = process.env.PORT || 5000;
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@atelier-renov.fr';
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1h
+
 if (!JWT_SECRET || !ADMIN_PASSWORD) {
     logger.fatal('Missing JWT_SECRET or ADMIN_PASSWORD — shutting down');
     process.exit(1);
@@ -51,6 +55,15 @@ const UPLOAD_MAX_REQUESTS = 20;
 const BCRYPT_ROUNDS = 10;
 const PG_POOL_MAX = 20;
 const JWT_EXPIRES_IN = '24h';
+
+// --- Resend (email) ---
+let resend = null;
+if (process.env.RESEND_API_KEY) {
+    const { Resend } = require('resend');
+    resend = new Resend(process.env.RESEND_API_KEY);
+}
+const RESEND_FROM = process.env.RESEND_FROM || 'onboarding@resend.dev';
+const APP_FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // --- Cloudinary Config (Cloud Mode) ---
 if (!IS_LOCAL) {
@@ -500,6 +513,14 @@ async function setupDb() {
         }
 
         await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, email TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
+        await query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id ${typeId},
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at ${typeTimestamp}
+        )`);
         const admins = await query('SELECT * FROM users WHERE username = ?', ['admin']);
         if (admins.rows.length === 0) {
             const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS);
@@ -549,11 +570,13 @@ const validateBag = (req, res, next) => {
     next();
 };
 
-const loginLimiter = rateLimit({
-    windowMs: LOGIN_WINDOW_MS,
-    max: LOGIN_MAX_ATTEMPTS,
-    message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
-});
+const loginLimiter = process.env.NODE_ENV === 'test'
+    ? (req, res, next) => next()
+    : rateLimit({
+        windowMs: LOGIN_WINDOW_MS,
+        max: LOGIN_MAX_ATTEMPTS,
+        message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
+    });
 
 const apiLimiter = rateLimit({
     windowMs: API_WINDOW_MS,
@@ -615,6 +638,82 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     } catch (err) {
         logger.error({ err });
         res.status(500).json({ error: 'Erreur lors de la connexion' });
+    }
+});
+
+app.post('/api/forgot-password', loginLimiter, async (req, res) => {
+    // Always 200 — ne pas révéler si l'email existe
+    try {
+        const { email } = req.body;
+        if (!email) return res.json({ success: true });
+
+        const result = await query('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+        const user = result.rows[0];
+        if (!user) return res.json({ success: true });
+
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+
+        await query(
+            'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+            [user.id, tokenHash, expiresAt]
+        );
+
+        const resetUrl = `${APP_FRONTEND_URL}/reset-password?token=${rawToken}`;
+
+        if (resend) {
+            await resend.emails.send({
+                from: RESEND_FROM,
+                to: email,
+                subject: "Réinitialisation de votre mot de passe — Atelier Rénov'",
+                html: `
+                    <div style="font-family:sans-serif;max-width:480px;margin:auto">
+                        <h2 style="color:#1a1a2e">Réinitialisation du mot de passe</h2>
+                        <p>Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe. Ce lien est valable <strong>1 heure</strong>.</p>
+                        <a href="${resetUrl}" style="display:inline-block;margin:1rem 0;padding:0.75rem 1.5rem;background:#c9a84c;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold">
+                            Réinitialiser mon mot de passe
+                        </a>
+                        <p style="color:#888;font-size:0.85rem">Si vous n'avez pas demandé cette réinitialisation, ignorez ce message.</p>
+                    </div>`
+            });
+        } else {
+            logger.info({ resetUrl }, 'DEV — reset password link (set RESEND_API_KEY to send real emails)');
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: "Erreur lors de l'envoi" });
+    }
+});
+
+app.post('/api/reset-password', loginLimiter, async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        if (!token || !password || password.length < 8) {
+            return res.status(400).json({ error: 'Token et mot de passe (min 8 caractères) requis' });
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const result = await query(
+            'SELECT * FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL',
+            [tokenHash]
+        );
+        const record = result.rows[0];
+
+        if (!record || new Date(record.expires_at) < new Date()) {
+            return res.status(400).json({ error: 'Lien invalide ou expiré' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, record.user_id]);
+        await query('UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?', [record.id]);
+
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur lors de la réinitialisation' });
     }
 });
 
@@ -1312,4 +1411,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, setupDb, closeDb };
+module.exports = { app, setupDb, closeDb, query };

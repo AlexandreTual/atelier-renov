@@ -9,6 +9,7 @@ import SkeletonCard from './components/SkeletonCard'
 import { ConfirmDialog } from './components/ConfirmDialog'
 import BagModal from './components/BagModal'
 import Login from './components/Login'
+import ResetPassword from './components/ResetPassword'
 import DashboardListModal from './components/DashboardListModal'
 import ConsumablesTab from './components/ConsumablesTab'
 import BusinessTab from './components/BusinessTab'
@@ -107,7 +108,15 @@ function App() {
   const capitalImmobilized = bags.filter(b => b.status !== 'sold').reduce((acc, b) => acc + (b.purchase_price || 0) + (b.material_costs || 0), 0)
 
   if (!token) {
-    return <Login onLogin={login} />
+    return (
+      <>
+        <Toaster position="top-right" />
+        <Routes>
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="*" element={<Login onLogin={login} />} />
+        </Routes>
+      </>
+    )
   }
 
   return (
