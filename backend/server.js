@@ -12,6 +12,8 @@ const stream = require('stream');
 const pino = require('pino');
 const pinoHttp = require('pino-http');
 
+const crypto = require('crypto');
+
 const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
 
 // --- Dual Mode Config ---
@@ -34,6 +36,9 @@ const PORT = process.env.PORT || 5000;
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@atelier-renov.fr';
+const RESET_TOKEN_TTL_MS = 60 * 60 * 1000; // 1h
+
 if (!JWT_SECRET || !ADMIN_PASSWORD) {
     logger.fatal('Missing JWT_SECRET or ADMIN_PASSWORD — shutting down');
     process.exit(1);
@@ -49,7 +54,16 @@ const UPLOAD_WINDOW_MS = 60 * 1000;        // 1 min
 const UPLOAD_MAX_REQUESTS = 20;
 const BCRYPT_ROUNDS = 10;
 const PG_POOL_MAX = 20;
-const JWT_EXPIRES_IN = '24h';
+const JWT_EXPIRES_IN = '7d';
+
+// --- Resend (email) ---
+let resend = null;
+if (process.env.RESEND_API_KEY) {
+    const { Resend } = require('resend');
+    resend = new Resend(process.env.RESEND_API_KEY);
+}
+const RESEND_FROM = process.env.RESEND_FROM || 'onboarding@resend.dev';
+const APP_FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // --- Cloudinary Config (Cloud Mode) ---
 if (!IS_LOCAL) {
@@ -287,6 +301,8 @@ async function setupDb() {
                 purchase_source TEXT,
                 is_donation ${typeBoolean},
                 item_type TEXT DEFAULT 'Sac',
+                listing_url TEXT,
+                user_id INTEGER NOT NULL DEFAULT 1,
                 created_at ${typeTimestamp}
             )
         `);
@@ -309,6 +325,7 @@ async function setupDb() {
                 title TEXT NOT NULL,
                 filters TEXT,
                 order_index INTEGER DEFAULT 0,
+                user_id INTEGER NOT NULL DEFAULT 1,
                 created_at ${typeTimestamp}
             )
         `);
@@ -323,6 +340,7 @@ async function setupDb() {
                 unit TEXT DEFAULT 'unité',
                 remaining_percentage INTEGER DEFAULT 100,
                 notes TEXT,
+                user_id INTEGER NOT NULL DEFAULT 1,
                 created_at ${typeTimestamp}
             )
         `);
@@ -334,6 +352,7 @@ async function setupDb() {
                 amount REAL DEFAULT 0,
                 category TEXT DEFAULT 'other',
                 date TEXT,
+                user_id INTEGER NOT NULL DEFAULT 1,
                 created_at ${typeTimestamp}
             )
         `);
@@ -341,16 +360,20 @@ async function setupDb() {
         await query(`
             CREATE TABLE IF NOT EXISTS brands (
                 id ${typeId},
-                name TEXT NOT NULL UNIQUE,
-                created_at ${typeTimestamp}
+                name TEXT NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                created_at ${typeTimestamp},
+                UNIQUE(name, user_id)
             )
         `);
 
         await query(`
             CREATE TABLE IF NOT EXISTS item_types (
                 id ${typeId},
-                name TEXT NOT NULL UNIQUE,
-                created_at ${typeTimestamp}
+                name TEXT NOT NULL,
+                user_id INTEGER NOT NULL DEFAULT 1,
+                created_at ${typeTimestamp},
+                UNIQUE(name, user_id)
             )
         `);
 
@@ -388,6 +411,60 @@ async function setupDb() {
         try { await query(`ALTER TABLE consumables ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
         try { await query(`ALTER TABLE expenses ADD COLUMN deleted_at ${tsType}`); } catch(e) { /* already exists */ }
 
+        // Migration: multi-tenancy — add user_id to data tables (idempotent)
+        const userIdMigrations = [
+            'ALTER TABLE users ADD COLUMN email TEXT',
+            'ALTER TABLE bags ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1',
+            'ALTER TABLE consumables ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1',
+            'ALTER TABLE expenses ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1',
+            'ALTER TABLE dashboard_lists ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1',
+        ];
+        for (const sql of userIdMigrations) {
+            try { await query(sql); } catch(e) { /* column already exists */ }
+        }
+
+        // Migration: brands/item_types — replace UNIQUE(name) with UNIQUE(name, user_id)
+        // SQLite: recreate table; PostgreSQL: add column + swap constraint
+        if (IS_LOCAL) {
+            const brandsInfo = await query("PRAGMA table_info(brands)");
+            if (!brandsInfo.rows.some(c => c.name === 'user_id')) {
+                await query(`CREATE TABLE brands_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(name, user_id)
+                )`);
+                await query('INSERT INTO brands_v2 SELECT id, name, 1, created_at FROM brands');
+                await query('DROP TABLE brands');
+                await query('ALTER TABLE brands_v2 RENAME TO brands');
+            }
+            const typesInfo = await query("PRAGMA table_info(item_types)");
+            if (!typesInfo.rows.some(c => c.name === 'user_id')) {
+                await query(`CREATE TABLE item_types_v2 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    user_id INTEGER NOT NULL DEFAULT 1,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(name, user_id)
+                )`);
+                await query('INSERT INTO item_types_v2 SELECT id, name, 1, created_at FROM item_types');
+                await query('DROP TABLE item_types');
+                await query('ALTER TABLE item_types_v2 RENAME TO item_types');
+            }
+        } else {
+            try { await query('ALTER TABLE brands ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1'); } catch(e) {}
+            try { await query('ALTER TABLE item_types ADD COLUMN user_id INTEGER NOT NULL DEFAULT 1'); } catch(e) {}
+            try {
+                await query(`DO $$ BEGIN ALTER TABLE brands DROP CONSTRAINT brands_name_key; EXCEPTION WHEN undefined_object THEN NULL; END $$`);
+                await query('CREATE UNIQUE INDEX IF NOT EXISTS brands_name_user_id ON brands(name, user_id)');
+            } catch(e) {}
+            try {
+                await query(`DO $$ BEGIN ALTER TABLE item_types DROP CONSTRAINT item_types_name_key; EXCEPTION WHEN undefined_object THEN NULL; END $$`);
+                await query('CREATE UNIQUE INDEX IF NOT EXISTS item_types_name_user_id ON item_types(name, user_id)');
+            } catch(e) {}
+        }
+
         // Migration : add FK constraints on existing PostgreSQL tables (idempotent)
         if (!IS_LOCAL) {
             const fkMigrations = [
@@ -413,35 +490,56 @@ async function setupDb() {
         await query('CREATE INDEX IF NOT EXISTS idx_bags_brand ON bags(brand)');
         await query('CREATE INDEX IF NOT EXISTS idx_bags_created_at ON bags(created_at)');
 
-        const brandsCount = await query('SELECT COUNT(*) as count FROM brands');
+        const brandsCount = await query('SELECT COUNT(*) as count FROM brands WHERE user_id = 1');
         const count = brandsCount.rows[0].count;
         if (parseInt(count) === 0) {
             const defaultBrands = ['Hermès', 'Louis Vuitton', 'Chanel', 'Dior', 'Gucci', 'Prada', 'Celine', 'Saint Laurent', 'Fendi', 'Balenciaga'];
             for (const brand of defaultBrands) {
                 try {
-                    await query('INSERT INTO brands (name) VALUES (?)', [brand]);
+                    await query('INSERT INTO brands (name, user_id) VALUES (?, 1)', [brand]);
                 } catch (e) { /* ignore */ }
             }
         }
 
-        const typesCount = await query('SELECT COUNT(*) as count FROM item_types');
+        const typesCount = await query('SELECT COUNT(*) as count FROM item_types WHERE user_id = 1');
         const tCount = typesCount.rows[0].count;
         if (parseInt(tCount) === 0) {
             const defaultTypes = ['Sac', 'Chaussures', 'Petite Maroquinerie', 'Vêtements', 'Accessoires', 'Autre'];
             for (const t of defaultTypes) {
                 try {
-                    await query('INSERT INTO item_types (name) VALUES (?)', [t]);
+                    await query('INSERT INTO item_types (name, user_id) VALUES (?, 1)', [t]);
                 } catch (e) { /* ignore */ }
             }
         }
 
-        await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
+        await query('CREATE TABLE IF NOT EXISTS users (id ' + typeId + ', username TEXT UNIQUE, email TEXT UNIQUE, password TEXT, created_at ' + typeTimestamp + ')');
+        await query(`CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id ${typeId},
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            used_at TEXT,
+            created_at ${typeTimestamp}
+        )`);
         const admins = await query('SELECT * FROM users WHERE username = ?', ['admin']);
         if (admins.rows.length === 0) {
             const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, BCRYPT_ROUNDS);
-            await query('INSERT INTO users (username, password) VALUES (?, ?)', ['admin', hashedPassword]);
+            await query('INSERT INTO users (username, email, password) VALUES (?, ?, ?)', ['admin', ADMIN_EMAIL, hashedPassword]);
             logger.info('Admin user created');
+        } else {
+            // Backfill email for existing admin
+            await query('UPDATE users SET email = ? WHERE username = ? AND email IS NULL', [ADMIN_EMAIL, 'admin']);
         }
+
+        // app_config: single-row global config
+        await query(`CREATE TABLE IF NOT EXISTS app_config (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            onboarding_enabled INTEGER NOT NULL DEFAULT 1
+        )`);
+        await query(`INSERT ${IS_LOCAL ? 'OR IGNORE' : ''} INTO app_config (id, onboarding_enabled) VALUES (1, 1) ${IS_LOCAL ? '' : 'ON CONFLICT (id) DO NOTHING'}`);
+
+        // Migration: onboarding_done on users (idempotent)
+        try { await query('ALTER TABLE users ADD COLUMN onboarding_done INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
 
         logger.info({ mode: IS_LOCAL ? 'LOCAL' : 'CLOUD' }, 'Database initialized');
     } catch (err) {
@@ -482,11 +580,13 @@ const validateBag = (req, res, next) => {
     next();
 };
 
-const loginLimiter = rateLimit({
-    windowMs: LOGIN_WINDOW_MS,
-    max: LOGIN_MAX_ATTEMPTS,
-    message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
-});
+const loginLimiter = process.env.NODE_ENV === 'test'
+    ? (req, res, next) => next()
+    : rateLimit({
+        windowMs: LOGIN_WINDOW_MS,
+        max: LOGIN_MAX_ATTEMPTS,
+        message: { error: 'Trop de tentatives de connexion, réessayez dans 15 minutes' }
+    });
 
 const apiLimiter = rateLimit({
     windowMs: API_WINDOW_MS,
@@ -502,10 +602,62 @@ const uploadLimiter = rateLimit({
 
 app.use('/api/', apiLimiter);
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+app.post('/api/register', loginLimiter, async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !EMAIL_REGEX.test(email)) {
+            return res.status(400).json({ error: 'Email invalide' });
+        }
+        if (!password || password.length < 8) {
+            return res.status(400).json({ error: 'Le mot de passe doit contenir au moins 8 caractères' });
+        }
+        const existing = await query('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+        if (existing.rows.length > 0) {
+            return res.status(409).json({ error: 'Un compte existe déjà avec cet email' });
+        }
+        const username = email.split('@')[0];
+        const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        const id = await insertAndGetId(
+            'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
+            [username, email.toLowerCase(), hashedPassword]
+        );
+        const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+        // Welcome email
+        if (resend) {
+            resend.emails.send({
+                from: RESEND_FROM,
+                to: email,
+                subject: "Bienvenue sur Atelier Rénov' !",
+                html: `
+                    <div style="font-family:sans-serif;max-width:480px;margin:auto">
+                        <h2 style="color:#1a1a2e">Bienvenue sur Atelier Rénov' !</h2>
+                        <p>Votre compte a bien été créé. Commencez dès maintenant à gérer vos articles de luxe.</p>
+                        <a href="${APP_FRONTEND_URL}" style="display:inline-block;margin:1rem 0;padding:0.75rem 1.5rem;background:#c9a84c;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold">
+                            Accéder à l'application
+                        </a>
+                    </div>`
+            }).catch(err => logger.error({ err }, 'Failed to send welcome email'));
+        } else {
+            logger.info({ email }, "DEV — welcome email not sent");
+        }
+
+        res.status(201).json({ token });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: "Erreur lors de la création du compte" });
+    }
+});
+
 app.post('/api/login', loginLimiter, async (req, res) => {
     try {
-        const { password } = req.body;
-        const result = await query('SELECT * FROM users WHERE username = ?', ['admin']);
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email et mot de passe requis' });
+        }
+        const result = await query('SELECT * FROM users WHERE email = ?', [email.toLowerCase()]);
         const user = result.rows[0];
 
         if (user && await bcrypt.compare(password, user.password)) {
@@ -516,6 +668,82 @@ app.post('/api/login', loginLimiter, async (req, res) => {
     } catch (err) {
         logger.error({ err });
         res.status(500).json({ error: 'Erreur lors de la connexion' });
+    }
+});
+
+app.post('/api/forgot-password', loginLimiter, async (req, res) => {
+    // Always 200 — ne pas révéler si l'email existe
+    try {
+        const { email } = req.body;
+        if (!email) return res.json({ success: true });
+
+        const result = await query('SELECT id FROM users WHERE email = ?', [email.toLowerCase()]);
+        const user = result.rows[0];
+        if (!user) return res.json({ success: true });
+
+        const rawToken = crypto.randomBytes(32).toString('hex');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+
+        await query(
+            'INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES (?, ?, ?)',
+            [user.id, tokenHash, expiresAt]
+        );
+
+        const resetUrl = `${APP_FRONTEND_URL}/reset-password?token=${rawToken}`;
+
+        if (resend) {
+            await resend.emails.send({
+                from: RESEND_FROM,
+                to: email,
+                subject: "Réinitialisation de votre mot de passe — Atelier Rénov'",
+                html: `
+                    <div style="font-family:sans-serif;max-width:480px;margin:auto">
+                        <h2 style="color:#1a1a2e">Réinitialisation du mot de passe</h2>
+                        <p>Cliquez sur le bouton ci-dessous pour définir un nouveau mot de passe. Ce lien est valable <strong>1 heure</strong>.</p>
+                        <a href="${resetUrl}" style="display:inline-block;margin:1rem 0;padding:0.75rem 1.5rem;background:#c9a84c;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold">
+                            Réinitialiser mon mot de passe
+                        </a>
+                        <p style="color:#888;font-size:0.85rem">Si vous n'avez pas demandé cette réinitialisation, ignorez ce message.</p>
+                    </div>`
+            });
+        } else {
+            logger.info({ resetUrl }, 'DEV — reset password link (set RESEND_API_KEY to send real emails)');
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: "Erreur lors de l'envoi" });
+    }
+});
+
+app.post('/api/reset-password', loginLimiter, async (req, res) => {
+    try {
+        const { token, password } = req.body;
+        if (!token || !password || password.length < 8) {
+            return res.status(400).json({ error: 'Token et mot de passe (min 8 caractères) requis' });
+        }
+
+        const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+        const result = await query(
+            'SELECT * FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL',
+            [tokenHash]
+        );
+        const record = result.rows[0];
+
+        if (!record || new Date(record.expires_at) < new Date()) {
+            return res.status(400).json({ error: 'Lien invalide ou expiré' });
+        }
+
+        const hashedPassword = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        await query('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, record.user_id]);
+        await query('UPDATE password_reset_tokens SET used_at = CURRENT_TIMESTAMP WHERE id = ?', [record.id]);
+
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur lors de la réinitialisation' });
     }
 });
 
@@ -539,12 +767,112 @@ app.post('/api/change-password', auth, async (req, res) => {
     }
 });
 
+app.get('/api/me', auth, async (req, res) => {
+    try {
+        const userResult = await query('SELECT id, email, username, onboarding_done FROM users WHERE id = ?', [req.user.id]);
+        const user = userResult.rows[0];
+        if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+        const configResult = await query('SELECT onboarding_enabled FROM app_config WHERE id = 1');
+        const onboarding_enabled = configResult.rows[0]?.onboarding_enabled ?? 1;
+        res.json({ ...user, onboarding_enabled });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.post('/api/onboarding/complete', auth, async (req, res) => {
+    try {
+        await query('UPDATE users SET onboarding_done = 1 WHERE id = ?', [req.user.id]);
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+async function checkBagOwnership(bagId, userId) {
+    const result = await query('SELECT id FROM bags WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [bagId, userId]);
+    return result.rows[0] || null;
+}
+
+const VALID_STATUSES = new Set(['to_be_cleaned','cleaning','repairing','drying','for_sale','sold']);
+const SORT_MAP = {
+    date_desc: 'created_at DESC',
+    date_asc:  'created_at ASC',
+    brand:     'brand ASC',
+    price_asc: 'purchase_price ASC',
+    price_desc:'purchase_price DESC',
+};
+
+app.get('/api/bags/stats', auth, async (req, res) => {
+    try {
+        const result = await query(`
+            SELECT
+                COALESCE(SUM(CASE WHEN status = 'sold'
+                    THEN actual_resale_price - purchase_price - fees - material_costs
+                    ELSE 0 END), 0) as total_profit,
+                COUNT(CASE WHEN status IN ('cleaning','repairing','drying') THEN 1 ELSE NULL END) as active_renovations,
+                COALESCE(SUM(CASE WHEN status != 'sold' THEN target_resale_price ELSE 0 END), 0) as stock_value_est,
+                COALESCE(SUM(CASE WHEN status != 'sold' THEN purchase_price + material_costs ELSE 0 END), 0) as capital_immobilized
+            FROM bags WHERE deleted_at IS NULL AND user_id = ?
+        `, [req.user.id]);
+        const row = result.rows[0];
+        res.json({
+            totalProfit:        parseFloat(row.total_profit)        || 0,
+            activeRenovations:  parseInt(row.active_renovations)    || 0,
+            stockValueEst:      parseFloat(row.stock_value_est)     || 0,
+            capitalImmobilized: parseFloat(row.capital_immobilized) || 0,
+        });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur lors du chargement des statistiques' });
+    }
+});
+
 app.get('/api/bags', auth, async (req, res) => {
     try {
-        const bagsResult = await query('SELECT * FROM bags WHERE deleted_at IS NULL ORDER BY created_at DESC');
-        const bags = bagsResult.rows;
+        const { search, brand, status, type, sort, page, limit } = req.query;
+        const pageNum  = Math.max(parseInt(page)  || 0, 0);
+        const pageSize = Math.min(parseInt(limit) || 50, 500);
+        const offset   = pageNum * pageSize;
 
-        if (bags.length === 0) return res.json([]);
+        const conditions = ['deleted_at IS NULL', 'user_id = ?'];
+        const params = [req.user.id];
+
+        if (search && search.trim()) {
+            const like = IS_LOCAL ? 'LIKE' : 'ILIKE';
+            conditions.push(`(name ${like} ? OR brand ${like} ?)`);
+            params.push(`%${search.trim()}%`, `%${search.trim()}%`);
+        }
+        if (brand && brand !== 'all') {
+            conditions.push('brand = ?');
+            params.push(brand);
+        }
+        if (status && status !== 'all') {
+            const statuses = status.split(',').filter(s => VALID_STATUSES.has(s));
+            if (statuses.length > 0) {
+                conditions.push(`status IN (${statuses.map(() => '?').join(',')})`);
+                params.push(...statuses);
+            }
+        }
+        if (type && type !== 'all') {
+            conditions.push('item_type = ?');
+            params.push(type);
+        }
+
+        const where   = conditions.join(' AND ');
+        const orderBy = SORT_MAP[sort] || 'created_at DESC';
+
+        const [countResult, bagsResult] = await Promise.all([
+            query(`SELECT COUNT(*) as count FROM bags WHERE ${where}`, params),
+            query(`SELECT * FROM bags WHERE ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`, [...params, pageSize, offset]),
+        ]);
+
+        const total = parseInt(countResult.rows[0].count) || 0;
+        const bags  = bagsResult.rows;
+
+        if (bags.length === 0) return res.json({ bags: [], total });
 
         const placeholders = bags.map(() => '?').join(', ');
         const imagesResult = await query(
@@ -558,7 +886,7 @@ app.get('/api/bags', auth, async (req, res) => {
             imagesByBagId[img.bag_id].push(img);
         }
 
-        res.json(bags.map(bag => ({ ...bag, images: imagesByBagId[bag.id] || [] })));
+        res.json({ bags: bags.map(bag => ({ ...bag, images: imagesByBagId[bag.id] || [] })), total });
     } catch (err) {
         logger.error({ err });
         res.status(500).json({ error: 'Internal server error' });
@@ -569,8 +897,8 @@ app.post('/api/bags', auth, validateBag, async (req, res) => {
     try {
         const { name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url } = req.body;
         const id = await insertAndGetId(
-            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', listing_url || null]
+            'INSERT INTO bags (name, brand, purchase_price, target_resale_price, status, purchase_source, is_donation, item_type, listing_url, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, brand, purchase_price, target_resale_price, status || 'to_be_cleaned', purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || 'Sac', listing_url || null, req.user.id]
         );
         res.json({ id });
     } catch (err) {
@@ -594,8 +922,8 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
                 actual_resale_price = ?, status = ?, purchase_date = ?, sale_date = ?,
                 fees = ?, material_costs = ?, time_spent = ?, notes = ?,
                 purchase_source = ?, is_donation = ?, item_type = ?, listing_url = ?
-            WHERE id = ?`,
-            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', listing_url || null, id]
+            WHERE id = ? AND user_id = ?`,
+            [name, brand, purchase_price, target_resale_price, actual_resale_price, status, purchase_date, sale_date, fees, material_costs, time_spent, notes, purchase_source, is_donation ? (IS_LOCAL ? 1 : true) : (IS_LOCAL ? 0 : false), item_type || '', listing_url || null, id, req.user.id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Article non trouvé' });
         res.json({ success: true });
@@ -609,8 +937,8 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await query(
-            'UPDATE bags SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
-            [id]
+            'UPDATE bags SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+            [id, req.user.id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Article non trouvé' });
         res.json({ success: true });
@@ -622,6 +950,7 @@ app.delete('/api/bags/:id', auth, async (req, res) => {
 
 app.get('/api/bags/:id/logs', auth, async (req, res) => {
     try {
+        if (!await checkBagOwnership(req.params.id, req.user.id)) return res.status(404).json({ error: 'Article non trouvé' });
         const result = await query('SELECT * FROM bag_logs WHERE bag_id = ? ORDER BY date DESC, created_at DESC', [req.params.id]);
         res.json(result.rows);
     } catch (err) {
@@ -632,6 +961,7 @@ app.get('/api/bags/:id/logs', auth, async (req, res) => {
 
 app.post('/api/bags/:id/logs', auth, async (req, res) => {
     try {
+        if (!await checkBagOwnership(req.params.id, req.user.id)) return res.status(404).json({ error: 'Article non trouvé' });
         const { action, date } = req.body;
         const id = await insertAndGetId(
             'INSERT INTO bag_logs (bag_id, action, date) VALUES (?, ?, ?)',
@@ -647,6 +977,10 @@ app.post('/api/bags/:id/logs', auth, async (req, res) => {
 
 app.delete('/api/logs/:id', auth, async (req, res) => {
     try {
+        const logResult = await query('SELECT bag_id FROM bag_logs WHERE id = ?', [req.params.id]);
+        const log = logResult.rows[0];
+        if (!log) return res.status(404).json({ error: 'Entrée non trouvée' });
+        if (!await checkBagOwnership(log.bag_id, req.user.id)) return res.status(404).json({ error: 'Non autorisé' });
         await query('DELETE FROM bag_logs WHERE id = ?', [req.params.id]);
         res.json({ success: true });
     } catch (err) {
@@ -657,6 +991,7 @@ app.delete('/api/logs/:id', auth, async (req, res) => {
 
 app.get('/api/bags/:id/consumables', auth, async (req, res) => {
     try {
+        if (!await checkBagOwnership(req.params.id, req.user.id)) return res.status(404).json({ error: 'Article non trouvé' });
         const sql = `
             SELECT bc.*, c.name as consumable_name, c.brand as consumable_brand
             FROM bag_consumables bc
@@ -674,6 +1009,7 @@ app.get('/api/bags/:id/consumables', auth, async (req, res) => {
 
 app.post('/api/bags/:id/consumables', auth, async (req, res) => {
     try {
+        if (!await checkBagOwnership(req.params.id, req.user.id)) return res.status(404).json({ error: 'Article non trouvé' });
         const { consumable_id, usage_percent } = req.body;
         const bag_id = req.params.id;
 
@@ -723,6 +1059,7 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
         const result = await query('SELECT * FROM bag_consumables WHERE id = ?', [req.params.id]);
         const link = result.rows[0];
         if (!link) return res.status(404).json({ error: 'Liaison non trouvée' });
+        if (!await checkBagOwnership(link.bag_id, req.user.id)) return res.status(404).json({ error: 'Non autorisé' });
 
         await withTransaction(async (txQuery) => {
             await txQuery(
@@ -749,6 +1086,7 @@ app.delete('/api/bag-consumables/:id', auth, async (req, res) => {
 app.post('/api/bags/:id/images', auth, async (req, res) => {
     try {
         const { id } = req.params;
+        if (!await checkBagOwnership(id, req.user.id)) return res.status(404).json({ error: 'Article non trouvé' });
         const { url, type, public_id } = req.body;
         const imageId = await insertAndGetId(
             'INSERT INTO images (bag_id, url, type, public_id) VALUES (?, ?, ?, ?)',
@@ -767,6 +1105,7 @@ app.delete('/api/images/:id', auth, async (req, res) => {
         const result = await query('SELECT * FROM images WHERE id = ?', [id]);
         const img = result.rows[0];
         if (img) {
+            if (!await checkBagOwnership(img.bag_id, req.user.id)) return res.status(404).json({ error: 'Non autorisé' });
             await deleteImage(img);
             await query('DELETE FROM images WHERE id = ?', [id]);
         }
@@ -798,7 +1137,7 @@ app.post('/api/upload', auth, uploadLimiter, (req, res, next) => {
 
 app.get('/api/dashboard-lists', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM dashboard_lists ORDER BY order_index ASC');
+        const result = await query('SELECT * FROM dashboard_lists WHERE user_id = ? ORDER BY order_index ASC', [req.user.id]);
         res.json(result.rows.map(l => {
             let filters = [];
             try { filters = JSON.parse(l.filters || '[]'); } catch {}
@@ -813,8 +1152,8 @@ app.post('/api/dashboard-lists', auth, async (req, res) => {
     try {
         const { title, filters, order_index } = req.body;
         const id = await insertAndGetId(
-            'INSERT INTO dashboard_lists (title, filters, order_index) VALUES (?, ?, ?)',
-            [title, JSON.stringify(filters || []), order_index || 0]
+            'INSERT INTO dashboard_lists (title, filters, order_index, user_id) VALUES (?, ?, ?, ?)',
+            [title, JSON.stringify(filters || []), order_index || 0, req.user.id]
         );
         res.json({ id });
     } catch (err) {
@@ -827,8 +1166,8 @@ app.put('/api/dashboard-lists/:id', auth, async (req, res) => {
         const { id } = req.params;
         const { title, filters, order_index } = req.body;
         await query(
-            'UPDATE dashboard_lists SET title = ?, filters = ?, order_index = ? WHERE id = ?',
-            [title, JSON.stringify(filters || []), order_index || 0, id]
+            'UPDATE dashboard_lists SET title = ?, filters = ?, order_index = ? WHERE id = ? AND user_id = ?',
+            [title, JSON.stringify(filters || []), order_index || 0, id, req.user.id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -839,7 +1178,7 @@ app.put('/api/dashboard-lists/:id', auth, async (req, res) => {
 app.delete('/api/dashboard-lists/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
-        await query('DELETE FROM dashboard_lists WHERE id = ?', [id]);
+        await query('DELETE FROM dashboard_lists WHERE id = ? AND user_id = ?', [id, req.user.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors de la suppression de la liste' });
@@ -850,7 +1189,7 @@ app.post('/api/dashboard-lists/reorder', auth, async (req, res) => {
     try {
         const { orders } = req.body;
         await Promise.all(orders.map(item =>
-            query('UPDATE dashboard_lists SET order_index = ? WHERE id = ?', [item.order_index, item.id])
+            query('UPDATE dashboard_lists SET order_index = ? WHERE id = ? AND user_id = ?', [item.order_index, item.id, req.user.id])
         ));
         res.json({ success: true });
     } catch (err) {
@@ -860,7 +1199,7 @@ app.post('/api/dashboard-lists/reorder', auth, async (req, res) => {
 
 app.get('/api/consumables', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM consumables WHERE deleted_at IS NULL ORDER BY created_at DESC');
+        const result = await query('SELECT * FROM consumables WHERE deleted_at IS NULL AND user_id = ? ORDER BY created_at DESC', [req.user.id]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors du chargement des produits' });
@@ -875,8 +1214,8 @@ app.post('/api/consumables', auth, async (req, res) => {
         if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
         const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
         const id = await insertAndGetId(
-            'INSERT INTO consumables (name, brand, purchase_price, quantity, unit, remaining_percentage, notes) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes]
+            'INSERT INTO consumables (name, brand, purchase_price, quantity, unit, remaining_percentage, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, req.user.id]
         );
         res.json({ id });
     } catch (err) {
@@ -893,8 +1232,8 @@ app.put('/api/consumables/:id', auth, async (req, res) => {
         if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
         const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
         await query(
-            'UPDATE consumables SET name = ?, brand = ?, purchase_price = ?, quantity = ?, unit = ?, remaining_percentage = ?, notes = ? WHERE id = ?',
-            [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, id]
+            'UPDATE consumables SET name = ?, brand = ?, purchase_price = ?, quantity = ?, unit = ?, remaining_percentage = ?, notes = ? WHERE id = ? AND user_id = ?',
+            [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, id, req.user.id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -906,8 +1245,8 @@ app.delete('/api/consumables/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await query(
-            'UPDATE consumables SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
-            [id]
+            'UPDATE consumables SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+            [id, req.user.id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Produit non trouvé' });
         res.json({ success: true });
@@ -918,7 +1257,7 @@ app.delete('/api/consumables/:id', auth, async (req, res) => {
 
 app.get('/api/expenses', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM expenses WHERE deleted_at IS NULL ORDER BY date DESC, created_at DESC');
+        const result = await query('SELECT * FROM expenses WHERE deleted_at IS NULL AND user_id = ? ORDER BY date DESC, created_at DESC', [req.user.id]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors du chargement des dépenses' });
@@ -932,8 +1271,8 @@ app.post('/api/expenses', auth, async (req, res) => {
         const amt = parseFloat(amount) || 0;
         if (amt < 0) return res.status(400).json({ error: 'Le montant ne peut pas être négatif' });
         const id = await insertAndGetId(
-            'INSERT INTO expenses (description, amount, category, date) VALUES (?, ?, ?, ?)',
-            [description, amt, category || 'other', date || new Date().toISOString().split('T')[0]]
+            'INSERT INTO expenses (description, amount, category, date, user_id) VALUES (?, ?, ?, ?, ?)',
+            [description, amt, category || 'other', date || new Date().toISOString().split('T')[0], req.user.id]
         );
         res.json({ id });
     } catch (err) {
@@ -946,8 +1285,8 @@ app.put('/api/expenses/:id', auth, async (req, res) => {
         const { id } = req.params;
         const { description, amount, category, date } = req.body;
         await query(
-            'UPDATE expenses SET description = ?, amount = ?, category = ?, date = ? WHERE id = ?',
-            [description, parseFloat(amount) || 0, category || 'other', date || new Date().toISOString().split('T')[0], id]
+            'UPDATE expenses SET description = ?, amount = ?, category = ?, date = ? WHERE id = ? AND user_id = ?',
+            [description, parseFloat(amount) || 0, category || 'other', date || new Date().toISOString().split('T')[0], id, req.user.id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -959,8 +1298,8 @@ app.delete('/api/expenses/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
         const result = await query(
-            'UPDATE expenses SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND deleted_at IS NULL',
-            [id]
+            'UPDATE expenses SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+            [id, req.user.id]
         );
         if (result.rowCount === 0) return res.status(404).json({ error: 'Dépense non trouvée' });
         res.json({ success: true });
@@ -977,7 +1316,7 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
                  ROUND(SUM(actual_resale_price), 2) as revenue,
                  ROUND(SUM(actual_resale_price - purchase_price - fees - material_costs), 2) as profit
                FROM bags
-               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != '' AND deleted_at IS NULL
+               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != '' AND deleted_at IS NULL AND user_id = ?
                GROUP BY substr(sale_date, 1, 7)
                ORDER BY month ASC`
             : `SELECT substring(sale_date, 1, 7) as month,
@@ -985,23 +1324,23 @@ app.get('/api/stats/monthly', auth, async (req, res) => {
                  ROUND(SUM(actual_resale_price)::numeric, 2) as revenue,
                  ROUND(SUM(actual_resale_price - purchase_price - fees - material_costs)::numeric, 2) as profit
                FROM bags
-               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != '' AND deleted_at IS NULL
+               WHERE status = 'sold' AND sale_date IS NOT NULL AND sale_date != '' AND deleted_at IS NULL AND user_id = ?
                GROUP BY substring(sale_date, 1, 7)
                ORDER BY month ASC`;
 
         const expensesSql = IS_LOCAL
             ? `SELECT substr(date, 1, 7) as month, ROUND(SUM(amount), 2) as expenses
-               FROM expenses WHERE date IS NOT NULL AND date != '' AND deleted_at IS NULL
+               FROM expenses WHERE date IS NOT NULL AND date != '' AND deleted_at IS NULL AND user_id = ?
                GROUP BY substr(date, 1, 7)
                ORDER BY month ASC`
             : `SELECT substring(date, 1, 7) as month, ROUND(SUM(amount)::numeric, 2) as expenses
-               FROM expenses WHERE date IS NOT NULL AND date != '' AND deleted_at IS NULL
+               FROM expenses WHERE date IS NOT NULL AND date != '' AND deleted_at IS NULL AND user_id = ?
                GROUP BY substring(date, 1, 7)
                ORDER BY month ASC`;
 
         const [salesResult, expensesResult] = await Promise.all([
-            query(salesSql),
-            query(expensesSql)
+            query(salesSql, [req.user.id]),
+            query(expensesSql, [req.user.id])
         ]);
 
         const months = new Map();
@@ -1039,8 +1378,8 @@ function csvEscape(value) {
 
 app.get('/api/export/csv', auth, async (req, res) => {
     try {
-        const bagsRes = await query('SELECT * FROM bags WHERE status = ? AND deleted_at IS NULL', ['sold']);
-        const expensesRes = await query('SELECT * FROM expenses WHERE deleted_at IS NULL');
+        const bagsRes = await query('SELECT * FROM bags WHERE status = ? AND deleted_at IS NULL AND user_id = ?', ['sold', req.user.id]);
+        const expensesRes = await query('SELECT * FROM expenses WHERE deleted_at IS NULL AND user_id = ?', [req.user.id]);
         const bags = bagsRes.rows;
         const expenses = expensesRes.rows;
 
@@ -1065,7 +1404,7 @@ app.get('/api/export/csv', auth, async (req, res) => {
 
 app.get('/api/brands', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM brands ORDER BY name ASC');
+        const result = await query('SELECT * FROM brands WHERE user_id = ? ORDER BY name ASC', [req.user.id]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors du chargement des marques' });
@@ -1076,7 +1415,7 @@ app.get('/api/brands', auth, async (req, res) => {
 
 app.get('/api/item-types', auth, async (req, res) => {
     try {
-        const result = await query('SELECT * FROM item_types ORDER BY name ASC');
+        const result = await query('SELECT * FROM item_types WHERE user_id = ? ORDER BY name ASC', [req.user.id]);
         res.json(result.rows);
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors du chargement des types' });
@@ -1087,7 +1426,9 @@ app.post('/api/item-types', auth, async (req, res) => {
     try {
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: 'Le nom est obligatoire' });
-        const id = await insertAndGetId('INSERT INTO item_types (name) VALUES (?)', [name]);
+        const existing = await query('SELECT id FROM item_types WHERE name = ? AND user_id = ?', [name, req.user.id]);
+        if (existing.rows.length > 0) return res.status(400).json({ error: 'Ce type existe déjà' });
+        const id = await insertAndGetId('INSERT INTO item_types (name, user_id) VALUES (?, ?)', [name, req.user.id]);
         res.json({ id });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors de la création du type' });
@@ -1098,12 +1439,11 @@ app.post('/api/brands', auth, async (req, res) => {
     try {
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: 'Le nom de la marque est obligatoire' });
-        const id = await insertAndGetId('INSERT INTO brands (name) VALUES (?)', [name]);
+        const existing = await query('SELECT id FROM brands WHERE name = ? AND user_id = ?', [name, req.user.id]);
+        if (existing.rows.length > 0) return res.status(400).json({ error: 'Cette marque existe déjà' });
+        const id = await insertAndGetId('INSERT INTO brands (name, user_id) VALUES (?, ?)', [name, req.user.id]);
         res.json({ id, name });
     } catch (err) {
-        if (err.message.includes('unique constraint') || err.message.includes('duplicate key') || err.message.includes('UNIQUE constraint failed')) {
-            return res.status(400).json({ error: 'Cette marque existe déjà' });
-        }
         res.status(500).json({ error: 'Erreur lors de la création de la marque' });
     }
 });
@@ -1112,7 +1452,7 @@ app.put('/api/brands/:id', auth, async (req, res) => {
     try {
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: 'Le nom est obligatoire' });
-        await query('UPDATE brands SET name = ? WHERE id = ?', [name, req.params.id]);
+        await query('UPDATE brands SET name = ? WHERE id = ? AND user_id = ?', [name, req.params.id, req.user.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors de la mise à jour de la marque' });
@@ -1121,13 +1461,13 @@ app.put('/api/brands/:id', auth, async (req, res) => {
 
 app.delete('/api/brands/:id', auth, async (req, res) => {
     try {
-        const brandResult = await query('SELECT name FROM brands WHERE id = ?', [req.params.id]);
+        const brandResult = await query('SELECT name FROM brands WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
         if (brandResult.rows.length === 0) return res.status(404).json({ error: 'Marque non trouvée' });
         const brandName = brandResult.rows[0].name;
-        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE brand = ? AND deleted_at IS NULL', [brandName]);
+        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE brand = ? AND user_id = ? AND deleted_at IS NULL', [brandName, req.user.id]);
         const count = parseInt(usageResult.rows[0].count) || 0;
         if (count > 0) return res.status(409).json({ error: `Cette marque est utilisée par ${count} article(s). Supprimez ou modifiez ces articles d'abord.` });
-        await query('DELETE FROM brands WHERE id = ?', [req.params.id]);
+        await query('DELETE FROM brands WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors de la suppression de la marque' });
@@ -1138,7 +1478,7 @@ app.put('/api/item-types/:id', auth, async (req, res) => {
     try {
         const { name } = req.body;
         if (!name) return res.status(400).json({ error: 'Le nom est obligatoire' });
-        await query('UPDATE item_types SET name = ? WHERE id = ?', [name, req.params.id]);
+        await query('UPDATE item_types SET name = ? WHERE id = ? AND user_id = ?', [name, req.params.id, req.user.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors de la mise à jour du type' });
@@ -1147,13 +1487,13 @@ app.put('/api/item-types/:id', auth, async (req, res) => {
 
 app.delete('/api/item-types/:id', auth, async (req, res) => {
     try {
-        const typeResult = await query('SELECT name FROM item_types WHERE id = ?', [req.params.id]);
+        const typeResult = await query('SELECT name FROM item_types WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
         if (typeResult.rows.length === 0) return res.status(404).json({ error: 'Type non trouvé' });
         const typeName = typeResult.rows[0].name;
-        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE item_type = ? AND deleted_at IS NULL', [typeName]);
+        const usageResult = await query('SELECT COUNT(*) as count FROM bags WHERE item_type = ? AND user_id = ? AND deleted_at IS NULL', [typeName, req.user.id]);
         const count = parseInt(usageResult.rows[0].count) || 0;
         if (count > 0) return res.status(409).json({ error: `Ce type est utilisé par ${count} article(s). Supprimez ou modifiez ces articles d'abord.` });
-        await query('DELETE FROM item_types WHERE id = ?', [req.params.id]);
+        await query('DELETE FROM item_types WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
         res.json({ success: true });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors de la suppression du type' });
@@ -1162,7 +1502,7 @@ app.delete('/api/item-types/:id', auth, async (req, res) => {
 
 app.get('/api/bags/:id', auth, async (req, res) => {
     try {
-        const bagResult = await query('SELECT * FROM bags WHERE id = ?', [req.params.id]);
+        const bagResult = await query('SELECT * FROM bags WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [req.params.id, req.user.id]);
         if (bagResult.rows.length === 0) return res.status(404).json({ error: 'Article non trouvé' });
         const bag = bagResult.rows[0];
         const imagesResult = await query('SELECT * FROM images WHERE bag_id = ?', [bag.id]);
@@ -1196,4 +1536,4 @@ if (require.main === module) {
     });
 }
 
-module.exports = { app, setupDb, closeDb };
+module.exports = { app, setupDb, closeDb, query };

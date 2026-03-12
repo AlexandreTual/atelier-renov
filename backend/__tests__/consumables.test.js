@@ -7,7 +7,7 @@ beforeAll(async () => {
     await setupDb();
     const res = await request(app)
         .post('/api/login')
-        .send({ password: 'testpassword123' });
+        .send({ email: 'admin@test.com', password: 'testpassword123' });
     token = res.body.token;
 });
 
