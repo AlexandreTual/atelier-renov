@@ -75,6 +75,7 @@ if (!IS_LOCAL) {
 }
 
 // --- Middleware ---
+app.set('trust proxy', 1); // Trust first proxy (nginx in Docker / Koyeb)
 app.use(helmet());
 
 // Simplify allowedOrigins calculation
@@ -82,7 +83,8 @@ const getAllowedOrigins = () => [
     process.env.FRONTEND_URL,
     process.env.FRONTEND_URL?.replace(/\/$/, ''), // Remove trailing slash
     'https://atelier-renov.vercel.app',
-    'http://localhost:5173'
+    'http://localhost:5173',
+    'http://localhost:8081'
 ].filter(Boolean);
 
 app.use(cors({
@@ -538,6 +540,15 @@ async function setupDb() {
         )`);
         await query(`INSERT ${IS_LOCAL ? 'OR IGNORE' : ''} INTO app_config (id, onboarding_enabled) VALUES (1, 1) ${IS_LOCAL ? '' : 'ON CONFLICT (id) DO NOTHING'}`);
 
+        // Migration: item_type on bags (idempotent)
+        try { await query("ALTER TABLE bags ADD COLUMN item_type TEXT DEFAULT 'Sac'"); } catch(e) { /* already exists */ }
+
+        // Migration: backfill null remaining_percentage on consumables
+        await query("UPDATE consumables SET remaining_percentage = 100 WHERE remaining_percentage IS NULL");
+
+        // Migration: public_id on images (idempotent)
+        try { await query('ALTER TABLE images ADD COLUMN public_id TEXT'); } catch(e) { /* already exists */ }
+
         // Migration: onboarding_done on users (idempotent)
         try { await query('ALTER TABLE users ADD COLUMN onboarding_done INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
 
@@ -604,6 +615,23 @@ app.use('/api/', apiLimiter);
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+async function seedDefaultDataForUser(userId) {
+    const brands = ['Hermès', 'Louis Vuitton', 'Chanel', 'Dior', 'Gucci', 'Prada', 'Céline', 'Saint Laurent', 'Fendi', 'Balenciaga'];
+    const types = ['Sac', 'Chaussures', 'Petite Maroquinerie', 'Vêtements', 'Accessoires', 'Autre'];
+    const brandSql = IS_LOCAL
+        ? 'INSERT OR IGNORE INTO brands (name, user_id) VALUES (?, ?)'
+        : 'INSERT INTO brands (name, user_id) VALUES (?, ?) ON CONFLICT (name, user_id) DO NOTHING';
+    const typeSql = IS_LOCAL
+        ? 'INSERT OR IGNORE INTO item_types (name, user_id) VALUES (?, ?)'
+        : 'INSERT INTO item_types (name, user_id) VALUES (?, ?) ON CONFLICT (name, user_id) DO NOTHING';
+    for (const name of brands) {
+        await query(brandSql, [name, userId]);
+    }
+    for (const name of types) {
+        await query(typeSql, [name, userId]);
+    }
+}
+
 app.post('/api/register', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -623,6 +651,7 @@ app.post('/api/register', loginLimiter, async (req, res) => {
             'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
             [username, email.toLowerCase(), hashedPassword]
         );
+        await seedDefaultDataForUser(id);
         const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
         // Welcome email
@@ -1025,14 +1054,6 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
         const cost = parseFloat(((consumable.purchase_price || 0) * (usagePct / 100)).toFixed(4));
 
         await withTransaction(async (txQuery) => {
-            // UPDATE conditionnel atomique : échoue si stock insuffisant au moment du commit (élimine la race condition)
-            const stockResult = await txQuery(
-                'UPDATE consumables SET remaining_percentage = remaining_percentage - ? WHERE id = ? AND remaining_percentage >= ?',
-                [usagePct, consumable_id, usagePct]
-            );
-            if (stockResult.rowCount === 0) {
-                throw Object.assign(new Error('Stock insuffisant'), { code: 'STOCK_INSUFFISANT' });
-            }
             await txQuery(
                 'INSERT INTO bag_consumables (bag_id, consumable_id, used_percentage, cost_at_time) VALUES (?, ?, ?, ?)',
                 [bag_id, consumable_id, usagePct, cost]
@@ -1046,9 +1067,6 @@ app.post('/api/bags/:id/consumables', auth, async (req, res) => {
         res.json({ success: true, cost_added: cost });
 
     } catch (err) {
-        if (err.code === 'STOCK_INSUFFISANT') {
-            return res.status(400).json({ error: 'Stock insuffisant' });
-        }
         logger.error({ err });
         res.status(500).json({ error: 'Internal server error' });
     }
