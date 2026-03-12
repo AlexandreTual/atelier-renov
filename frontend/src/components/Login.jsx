@@ -1,8 +1,11 @@
 import React, { useState } from 'react'
-import { Lock, Briefcase } from 'lucide-react'
+import { Lock, Mail, Briefcase } from 'lucide-react'
 
 function Login({ onLogin }) {
+    const [view, setView] = useState('login') // 'login' | 'register'
+    const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
+    const [confirmPassword, setConfirmPassword] = useState('')
     const [error, setError] = useState('')
     const [loading, setLoading] = useState(false)
 
@@ -11,11 +14,18 @@ function Login({ onLogin }) {
         setLoading(true)
         setError('')
 
+        if (view === 'register' && password !== confirmPassword) {
+            setError('Les mots de passe ne correspondent pas')
+            setLoading(false)
+            return
+        }
+
         try {
-            const resp = await fetch('/api/login', {
+            const endpoint = view === 'login' ? '/api/login' : '/api/register'
+            const resp = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password })
+                body: JSON.stringify({ email, password })
             })
 
             const data = await resp.json()
@@ -23,13 +33,21 @@ function Login({ onLogin }) {
             if (resp.ok) {
                 onLogin(data.token)
             } else {
-                setError(data.error || 'Mot de passe incorrect')
+                setError(data.error || (view === 'login' ? 'Identifiants invalides' : 'Erreur lors de la création du compte'))
             }
-        } catch (err) {
+        } catch {
             setError('Erreur de connexion au serveur')
         } finally {
             setLoading(false)
         }
+    }
+
+    const switchView = (v) => {
+        setView(v)
+        setError('')
+        setEmail('')
+        setPassword('')
+        setConfirmPassword('')
     }
 
     return (
@@ -54,11 +72,29 @@ function Login({ onLogin }) {
                     <span style={{ fontSize: '1.75rem', marginLeft: '0.5rem' }}>Atelier Rénov'</span>
                 </div>
 
-                <h2 style={{ marginBottom: '0.5rem' }}>Connexion</h2>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Espace réservé à l'administration</p>
+                <h2 style={{ marginBottom: '0.5rem' }}>
+                    {view === 'login' ? 'Connexion' : 'Créer un compte'}
+                </h2>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
+                    {view === 'login' ? 'Connectez-vous à votre espace' : 'Rejoignez Atelier Rénov\''}
+                </p>
 
                 <form onSubmit={handleSubmit}>
                     <div className="form-group" style={{ textAlign: 'left' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <Mail size={16} /> Email
+                        </label>
+                        <input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="vous@exemple.fr"
+                            required
+                            style={{ marginTop: '0.5rem' }}
+                        />
+                    </div>
+
+                    <div className="form-group" style={{ textAlign: 'left', marginTop: '1rem' }}>
                         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             <Lock size={16} /> Mot de passe
                         </label>
@@ -68,21 +104,57 @@ function Login({ onLogin }) {
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder="••••••••"
                             required
+                            minLength={8}
                             style={{ marginTop: '0.5rem' }}
                         />
                     </div>
 
-                    {error && <p style={{ color: '#e74c3c', fontSize: '0.875rem', marginBottom: '1rem' }}>{error}</p>}
+                    {view === 'register' && (
+                        <div className="form-group" style={{ textAlign: 'left', marginTop: '1rem' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <Lock size={16} /> Confirmer le mot de passe
+                            </label>
+                            <input
+                                type="password"
+                                value={confirmPassword}
+                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                placeholder="••••••••"
+                                required
+                                style={{ marginTop: '0.5rem' }}
+                            />
+                        </div>
+                    )}
+
+                    {error && <p style={{ color: '#e74c3c', fontSize: '0.875rem', marginTop: '1rem', marginBottom: '0' }}>{error}</p>}
 
                     <button
                         type="submit"
                         className="btn-primary"
                         disabled={loading}
-                        style={{ width: '100%', justifyContent: 'center', marginTop: '1rem' }}
+                        style={{ width: '100%', justifyContent: 'center', marginTop: '1.25rem' }}
                     >
-                        {loading ? 'Connexion...' : 'Se connecter'}
+                        {loading
+                            ? (view === 'login' ? 'Connexion...' : 'Création...')
+                            : (view === 'login' ? 'Se connecter' : 'Créer mon compte')
+                        }
                     </button>
                 </form>
+
+                <p style={{ marginTop: '1.5rem', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                    {view === 'login' ? (
+                        <>Pas encore de compte ?{' '}
+                            <button onClick={() => switchView('register')} style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}>
+                                S'inscrire
+                            </button>
+                        </>
+                    ) : (
+                        <>Déjà un compte ?{' '}
+                            <button onClick={() => switchView('login')} style={{ background: 'none', border: 'none', color: 'var(--primary-color)', cursor: 'pointer', padding: 0, fontSize: 'inherit', textDecoration: 'underline' }}>
+                                Se connecter
+                            </button>
+                        </>
+                    )}
+                </p>
             </div>
         </div>
     )
