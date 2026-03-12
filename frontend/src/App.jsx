@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Clock, Plus, Settings, ChevronUp, ChevronDown } from 'lucide-react'
+import { Clock, Plus, Settings, ChevronUp, ChevronDown, PackageOpen } from 'lucide-react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
@@ -150,6 +150,7 @@ function App() {
           itemTypes={itemTypes}
           bagTotal={bagTotal}
           onDismiss={markOnboardingDone}
+          onNewArticle={() => openModal()}
         />
         <Header onAddNew={() => openModal()} />
 
@@ -275,17 +276,25 @@ function App() {
                   {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
                 </div>
               ) : bags.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
-                  <p>{bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all'
-                    ? "Aucun article dans l'inventaire."
-                    : 'Aucun article ne correspond aux filtres sélectionnés.'}
-                  </p>
-                  {bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all' && (
-                    <button onClick={() => openModal()} style={{ marginTop: '1rem', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                      Ajouter mon premier article
-                    </button>
-                  )}
-                </div>
+                (() => {
+                  const isEmptyInventory = bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all'
+                  return isEmptyInventory ? (
+                    <div style={{ textAlign: 'center', padding: '5rem 2rem', background: '#f9f9f9', borderRadius: '16px', color: '#666' }}>
+                      <PackageOpen size={56} strokeWidth={1.2} style={{ color: '#ccc', marginBottom: '1.25rem' }} />
+                      <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.2rem', color: '#444', fontWeight: 600 }}>Votre inventaire est vide</h3>
+                      <p style={{ margin: '0 0 1.75rem', fontSize: '0.95rem', maxWidth: '340px', marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+                        Ajoutez votre premier article pour commencer à suivre vos rénovations et vos marges.
+                      </p>
+                      <button onClick={() => openModal()} className="btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1.5rem' }}>
+                        <Plus size={18} /> Ajouter un article
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
+                      <p>Aucun article ne correspond aux filtres sélectionnés.</p>
+                    </div>
+                  )
+                })()
               ) : (
                 <>
                   {(searchTerm || brandFilter !== 'all' || statusFilter !== 'all' || itemTypeFilter !== 'all') && (

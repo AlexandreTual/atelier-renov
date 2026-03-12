@@ -604,6 +604,23 @@ app.use('/api/', apiLimiter);
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+async function seedDefaultDataForUser(userId) {
+    const brands = ['Hermès', 'Louis Vuitton', 'Chanel', 'Dior', 'Gucci', 'Prada', 'Céline', 'Saint Laurent', 'Fendi', 'Balenciaga'];
+    const types = ['Sac', 'Chaussures', 'Petite Maroquinerie', 'Vêtements', 'Accessoires', 'Autre'];
+    const brandSql = IS_LOCAL
+        ? 'INSERT OR IGNORE INTO brands (name, user_id) VALUES (?, ?)'
+        : 'INSERT INTO brands (name, user_id) VALUES (?, ?) ON CONFLICT (name, user_id) DO NOTHING';
+    const typeSql = IS_LOCAL
+        ? 'INSERT OR IGNORE INTO item_types (name, user_id) VALUES (?, ?)'
+        : 'INSERT INTO item_types (name, user_id) VALUES (?, ?) ON CONFLICT (name, user_id) DO NOTHING';
+    for (const name of brands) {
+        await query(brandSql, [name, userId]);
+    }
+    for (const name of types) {
+        await query(typeSql, [name, userId]);
+    }
+}
+
 app.post('/api/register', loginLimiter, async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -623,6 +640,7 @@ app.post('/api/register', loginLimiter, async (req, res) => {
             'INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
             [username, email.toLowerCase(), hashedPassword]
         );
+        await seedDefaultDataForUser(id);
         const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
         // Welcome email
