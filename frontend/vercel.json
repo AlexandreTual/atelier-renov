@@ -2,7 +2,7 @@
   "rewrites": [
     {
       "source": "/api/(.*)",
-      "destination": "https://purring-kristin-levyathan-40ad1ffe.koyeb.app/api/$1"
+      "destination": "https://unique-elisa-atelier-renov-e5ebf32f.koyeb.app/api/$1"
     },
     {
       "source": "/(.*)",
