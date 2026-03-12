@@ -54,7 +54,7 @@ const UPLOAD_WINDOW_MS = 60 * 1000;        // 1 min
 const UPLOAD_MAX_REQUESTS = 20;
 const BCRYPT_ROUNDS = 10;
 const PG_POOL_MAX = 20;
-const JWT_EXPIRES_IN = '24h';
+const JWT_EXPIRES_IN = '7d';
 
 // --- Resend (email) ---
 let resend = null;
@@ -531,6 +531,16 @@ async function setupDb() {
             await query('UPDATE users SET email = ? WHERE username = ? AND email IS NULL', [ADMIN_EMAIL, 'admin']);
         }
 
+        // app_config: single-row global config
+        await query(`CREATE TABLE IF NOT EXISTS app_config (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            onboarding_enabled INTEGER NOT NULL DEFAULT 1
+        )`);
+        await query(`INSERT ${IS_LOCAL ? 'OR IGNORE' : ''} INTO app_config (id, onboarding_enabled) VALUES (1, 1) ${IS_LOCAL ? '' : 'ON CONFLICT (id) DO NOTHING'}`);
+
+        // Migration: onboarding_done on users (idempotent)
+        try { await query('ALTER TABLE users ADD COLUMN onboarding_done INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
+
         logger.info({ mode: IS_LOCAL ? 'LOCAL' : 'CLOUD' }, 'Database initialized');
     } catch (err) {
         logger.error({ err }, 'Database initialization failed');
@@ -614,6 +624,26 @@ app.post('/api/register', loginLimiter, async (req, res) => {
             [username, email.toLowerCase(), hashedPassword]
         );
         const token = jwt.sign({ id, username }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+
+        // Welcome email
+        if (resend) {
+            resend.emails.send({
+                from: RESEND_FROM,
+                to: email,
+                subject: "Bienvenue sur Atelier Rénov' !",
+                html: `
+                    <div style="font-family:sans-serif;max-width:480px;margin:auto">
+                        <h2 style="color:#1a1a2e">Bienvenue sur Atelier Rénov' !</h2>
+                        <p>Votre compte a bien été créé. Commencez dès maintenant à gérer vos articles de luxe.</p>
+                        <a href="${APP_FRONTEND_URL}" style="display:inline-block;margin:1rem 0;padding:0.75rem 1.5rem;background:#c9a84c;color:#fff;text-decoration:none;border-radius:6px;font-weight:bold">
+                            Accéder à l'application
+                        </a>
+                    </div>`
+            }).catch(err => logger.error({ err }, 'Failed to send welcome email'));
+        } else {
+            logger.info({ email }, "DEV — welcome email not sent");
+        }
+
         res.status(201).json({ token });
     } catch (err) {
         logger.error({ err });
@@ -734,6 +764,30 @@ app.post('/api/change-password', auth, async (req, res) => {
         res.status(400).json({ error: 'Ancien mot de passe incorrect' });
     } catch (err) {
         res.status(500).json({ error: 'Erreur lors du changement de mot de passe' });
+    }
+});
+
+app.get('/api/me', auth, async (req, res) => {
+    try {
+        const userResult = await query('SELECT id, email, username, onboarding_done FROM users WHERE id = ?', [req.user.id]);
+        const user = userResult.rows[0];
+        if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
+        const configResult = await query('SELECT onboarding_enabled FROM app_config WHERE id = 1');
+        const onboarding_enabled = configResult.rows[0]?.onboarding_enabled ?? 1;
+        res.json({ ...user, onboarding_enabled });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.post('/api/onboarding/complete', auth, async (req, res) => {
+    try {
+        await query('UPDATE users SET onboarding_done = 1 WHERE id = ?', [req.user.id]);
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
     }
 });
 

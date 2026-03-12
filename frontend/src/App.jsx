@@ -14,6 +14,7 @@ import DashboardListModal from './components/DashboardListModal'
 import ConsumablesTab from './components/ConsumablesTab'
 import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
+import OnboardingChecklist from './components/OnboardingChecklist'
 import { Toaster } from 'react-hot-toast'
 import { STATUSES } from './constants'
 
@@ -28,7 +29,7 @@ import { useBrandActions } from './hooks/useBrandActions'
 import { useItemTypeActions } from './hooks/useItemTypeActions'
 
 function App() {
-  const { token, authenticatedFetch, login, logout } = useAuth()
+  const { token, user, authenticatedFetch, login, logout, markOnboardingDone, fetchMe } = useAuth()
   const {
     bags, bagTotal, bagStats, dashboardBags,
     dashboardLists, setDashboardLists, consumables, expenses, brands, itemTypes,
@@ -87,8 +88,11 @@ function App() {
   const { handleAddItemType } = useItemTypeActions(authenticatedFetch, fetchItemTypes)
 
   useEffect(() => {
-    if (token) fetchAll()
-  }, [token, fetchAll])
+    if (token) {
+      fetchAll()
+      fetchMe(token)
+    }
+  }, [token, fetchAll, fetchMe])
 
   const openModal = (bag = null) => {
     if (bag) {
@@ -140,6 +144,13 @@ function App() {
       <Sidebar onLogout={logout} />
 
       <main className="main-content">
+        <OnboardingChecklist
+          user={user}
+          brands={brands}
+          itemTypes={itemTypes}
+          bagTotal={bagTotal}
+          onDismiss={markOnboardingDone}
+        />
         <Header onAddNew={() => openModal()} />
 
         <Routes>
