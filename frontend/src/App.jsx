@@ -426,6 +426,7 @@ function App() {
           itemTypes={itemTypes}
           onAddItemType={handleAddItemType}
           authenticatedFetch={authenticatedFetch}
+          onConsumableCreated={fetchConsumables}
         />
 
         <DashboardListModal

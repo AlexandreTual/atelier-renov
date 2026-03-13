@@ -50,7 +50,8 @@ function BagModal({
     onAddBrand,
     itemTypes = [],
     onAddItemType,
-    authenticatedFetch
+    authenticatedFetch,
+    onConsumableCreated
 }) {
     const [uploading, setUploading] = useState(false)
     const [imageType, setImageType] = useState('other')
@@ -410,6 +411,7 @@ function BagModal({
                             <BagConsumables
                                 bagId={selectedBag.id}
                                 authenticatedFetch={authenticatedFetch}
+                                onConsumableCreated={onConsumableCreated}
                                 onUpdateCost={(costDiff) => {
                                     setFormData(prev => ({
                                         ...prev,
