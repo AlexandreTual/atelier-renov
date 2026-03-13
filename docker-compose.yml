@@ -2,7 +2,13 @@ version: '3.8'
 
 services:
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        - BUILDKIT_INLINE_CACHE=1
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     ports:
       - "5001:5000"
     volumes:

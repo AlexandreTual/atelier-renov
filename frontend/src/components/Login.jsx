@@ -96,7 +96,7 @@ function Login({ onLogin }) {
                 </h2>
                 <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>
                     {view === 'login' ? 'Connectez-vous à votre espace'
-                        : view === 'register' ? "Rejoignez Atelier Rénov'"
+                        : view === 'register' ? "Gérez vos rénovations et revendez plus facilement"
                         : 'Recevez un lien de réinitialisation par email'}
                 </p>
 

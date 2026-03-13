@@ -9,7 +9,7 @@ const Step = ({ done, label }) => (
     </div>
 )
 
-export default function OnboardingChecklist({ user, brands, itemTypes, bagTotal, onDismiss }) {
+export default function OnboardingChecklist({ user, brands, itemTypes, bagTotal, onDismiss, onNewArticle }) {
     if (!user || !user.onboarding_enabled || user.onboarding_done) return null
 
     const step1 = (brands?.length ?? 0) > 0
@@ -55,7 +55,24 @@ export default function OnboardingChecklist({ user, brands, itemTypes, bagTotal,
             </div>
             <Step done={step1} label="Ajouter une marque" />
             <Step done={step2} label="Ajouter un type d'article" />
-            <Step done={step3} label="Créer votre premier article" />
+            {step3
+                ? <Step done={true} label="Créer votre premier article" />
+                : (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <Step done={false} label="Créer votre premier article" />
+                        <button
+                            onClick={onNewArticle}
+                            style={{
+                                fontSize: '0.8rem', padding: '0.2rem 0.6rem',
+                                background: 'var(--accent-gold)', color: '#fff',
+                                border: 'none', borderRadius: '6px', cursor: 'pointer'
+                            }}
+                        >
+                            + Créer
+                        </button>
+                    </div>
+                )
+            }
         </div>
     )
 }

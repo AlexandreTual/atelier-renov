@@ -1,17 +1,13 @@
 # Backend Dockerfile
-FROM node:20-slim
+FROM node:20-alpine
 
 WORKDIR /app
 
 # Build dependencies for sqlite3 (native module)
-RUN apt-get -o Acquire::Check-Date=false update && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache python3 make g++
 
 # Create non-root user
-RUN groupadd -r appgroup && useradd -r -g appgroup appuser
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
 # Install dependencies (reproducible, no lockfile mutation)
 COPY package*.json ./
