@@ -166,10 +166,10 @@ describe('Isolation — brands', () => {
         expect(ids).toContain(brandIdA);
     });
 
-    it('userB sees empty brands list', async () => {
+    it('userB sees only seeded brands (no brands from userA)', async () => {
         const res = await request(app).get('/api/brands').set(authB());
         expect(res.status).toBe(200);
-        expect(res.body).toEqual([]);
+        expect(res.body).toHaveLength(10);
     });
 
     it('userB can create a brand with the same name as userA', async () => {
@@ -215,17 +215,17 @@ describe('Isolation — dashboard lists', () => {
 
 // --- Item types isolation ---
 describe('Isolation — item types', () => {
-    it('userB sees empty item types list', async () => {
+    it('userB sees only seeded item types (no types from userA)', async () => {
         const res = await request(app).get('/api/item-types').set(authB());
         expect(res.status).toBe(200);
-        expect(res.body).toEqual([]);
+        expect(res.body).toHaveLength(6);
     });
 
-    it('userB can create an item type', async () => {
+    it('userB can create a custom item type', async () => {
         const res = await request(app)
             .post('/api/item-types')
             .set(authB())
-            .send({ name: 'Sac' });
+            .send({ name: 'Bijoux' });
         expect(res.status).toBe(200);
     });
 });

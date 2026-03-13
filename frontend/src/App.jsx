@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { Clock, Plus, Settings, ChevronUp, ChevronDown } from 'lucide-react'
+import { Clock, Plus, Settings, ChevronUp, ChevronDown, PackageOpen } from 'lucide-react'
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
@@ -14,7 +14,8 @@ import DashboardListModal from './components/DashboardListModal'
 import ConsumablesTab from './components/ConsumablesTab'
 import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
-import OnboardingChecklist from './components/OnboardingChecklist'
+import OnboardingTour from './components/OnboardingTour'
+import OnboardingFloating from './components/OnboardingFloating'
 import { Toaster } from 'react-hot-toast'
 import { STATUSES } from './constants'
 
@@ -54,6 +55,8 @@ function App() {
   const [inventoryPage, setInventoryPage] = useState(0)
   const [showListModal, setShowListModal] = useState(false)
   const [selectedList, setSelectedList] = useState(null)
+  const [showTour, setShowTour] = useState(false)
+  const tourShownRef = React.useRef(false)
 
   const searchDebounce = useRef(null)
 
@@ -93,6 +96,13 @@ function App() {
       fetchMe(token)
     }
   }, [token, fetchAll, fetchMe])
+
+  useEffect(() => {
+    if (user && !user.onboarding_done && !tourShownRef.current) {
+      tourShownRef.current = true
+      setShowTour(true)
+    }
+  }, [user])
 
   const openModal = (bag = null) => {
     if (bag) {
@@ -144,12 +154,35 @@ function App() {
       <Sidebar onLogout={logout} />
 
       <main className="main-content">
-        <OnboardingChecklist
+        {showTour && (
+          <OnboardingTour
+            steps={[
+              {
+                target: null,
+                title: 'Bienvenue sur Atelier Rénov\' !',
+                description: 'Vos marques et types d\'articles sont déjà configurés. Il ne reste plus qu\'une chose à faire : créer votre premier article.',
+                primaryLabel: 'Allons-y',
+              },
+              {
+                target: 'add-article',
+                title: 'Créez votre premier article',
+                description: 'Cliquez ici pour ajouter un sac, une paire de chaussures ou tout autre article à rénover et revendre.',
+                primaryLabel: 'Ajouter un article',
+                onClick: () => openModal(),
+              },
+            ]}
+            onComplete={() => setShowTour(false)}
+            onSkip={() => setShowTour(false)}
+          />
+        )}
+        <OnboardingFloating
           user={user}
           brands={brands}
           itemTypes={itemTypes}
           bagTotal={bagTotal}
           onDismiss={markOnboardingDone}
+          onNewArticle={() => openModal()}
+          onStartTour={() => setShowTour(true)}
         />
         <Header onAddNew={() => openModal()} />
 
@@ -275,17 +308,25 @@ function App() {
                   {Array.from({ length: 6 }).map((_, i) => <SkeletonCard key={i} />)}
                 </div>
               ) : bags.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
-                  <p>{bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all'
-                    ? "Aucun article dans l'inventaire."
-                    : 'Aucun article ne correspond aux filtres sélectionnés.'}
-                  </p>
-                  {bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all' && (
-                    <button onClick={() => openModal()} style={{ marginTop: '1rem', color: 'var(--primary-color)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>
-                      Ajouter mon premier article
-                    </button>
-                  )}
-                </div>
+                (() => {
+                  const isEmptyInventory = bagTotal === 0 && !searchTerm && brandFilter === 'all' && statusFilter === 'all' && itemTypeFilter === 'all'
+                  return isEmptyInventory ? (
+                    <div style={{ textAlign: 'center', padding: '5rem 2rem', background: '#f9f9f9', borderRadius: '16px', color: '#666' }}>
+                      <PackageOpen size={56} strokeWidth={1.2} style={{ color: '#ccc', marginBottom: '1.25rem' }} />
+                      <h3 style={{ margin: '0 0 0.5rem', fontSize: '1.2rem', color: '#444', fontWeight: 600 }}>Votre inventaire est vide</h3>
+                      <p style={{ margin: '0 0 1.75rem', fontSize: '0.95rem', maxWidth: '340px', marginLeft: 'auto', marginRight: 'auto', lineHeight: 1.6 }}>
+                        Ajoutez votre premier article pour commencer à suivre vos rénovations et vos marges.
+                      </p>
+                      <button onClick={() => openModal()} className="btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.75rem 1.5rem' }}>
+                        <Plus size={18} /> Ajouter un article
+                      </button>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: '4rem', background: '#f9f9f9', borderRadius: '12px', color: '#666' }}>
+                      <p>Aucun article ne correspond aux filtres sélectionnés.</p>
+                    </div>
+                  )
+                })()
               ) : (
                 <>
                   {(searchTerm || brandFilter !== 'all' || statusFilter !== 'all' || itemTypeFilter !== 'all') && (
