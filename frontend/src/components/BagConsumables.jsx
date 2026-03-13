@@ -3,7 +3,7 @@ import { Package, Trash2, Plus, AlertCircle, RefreshCw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { confirm } from './ConfirmDialog';
 
-function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
+function BagConsumables({ bagId, authenticatedFetch, onUpdateCost, onConsumableCreated }) {
     const [consumablesList, setConsumablesList] = useState([]); // Linked consumables
     const [availableConsumables, setAvailableConsumables] = useState([]); // Dropdown options
     const [loading, setLoading] = useState(false);
@@ -106,6 +106,7 @@ function BagConsumables({ bagId, authenticatedFetch, onUpdateCost }) {
                 setNewPrice('');
                 setShowInlineCreate(false);
                 toast.success('Produit créé et sélectionné');
+                if (onConsumableCreated) onConsumableCreated();
             } else {
                 const err = await resp.json();
                 toast.error(err.error || 'Erreur lors de la création');
