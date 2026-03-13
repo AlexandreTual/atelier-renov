@@ -1,8 +1,8 @@
 import React from 'react'
-import { Briefcase, LayoutDashboard, Package, LogOut, Settings } from 'lucide-react'
+import { Briefcase, LayoutDashboard, Package, LogOut, Settings, Shield } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 
-function Sidebar({ onLogout }) {
+function Sidebar({ onLogout, isAdmin }) {
     return (
         <aside className="sidebar">
             <div className="sidebar-logo">
@@ -56,6 +56,17 @@ function Sidebar({ onLogout }) {
                             Paramètres
                         </NavLink>
                     </li>
+                    {isAdmin && (
+                        <li className="nav-item">
+                            <NavLink
+                                to="/admin"
+                                className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+                            >
+                                <Shield size={20} />
+                                Admin
+                            </NavLink>
+                        </li>
+                    )}
                 </ul>
             </nav>
             <div className="sidebar-footer" style={{ borderTop: '1px solid rgba(255,255,255,0.1)', paddingTop: '1rem' }}>
