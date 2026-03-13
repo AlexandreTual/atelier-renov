@@ -3,7 +3,7 @@ import { Plus, Trash2, Edit2, Package, AlertTriangle } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { confirm } from './ConfirmDialog'
 
-const LOW_STOCK_THRESHOLD = 20
+const LOW_STOCK_THRESHOLD = 1
 
 function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
     const [showModal, setShowModal] = useState(false)
@@ -82,7 +82,7 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
         c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.brand && c.brand.toLowerCase().includes(searchTerm.toLowerCase()))
     )
-    const lowStockItems = consumables.filter(c => c.remaining_percentage < LOW_STOCK_THRESHOLD)
+    const lowStockItems = consumables.filter(c => (c.quantity ?? 0) <= LOW_STOCK_THRESHOLD)
 
     return (
         <section>
@@ -120,35 +120,25 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
                         Stock faible :
                     </span>
                     <span style={{ color: '#92400e', fontSize: '0.9rem' }}>
-                        {lowStockItems.map(c => `${c.name} (${c.remaining_percentage}%)`).join(' · ')}
+                        {lowStockItems.map(c => `${c.name} (${c.quantity} ${c.unit})`).join(' · ')}
                     </span>
                 </div>
             )}
 
             <div className="inventory-grid">
                 {filteredConsumables.map(item => (
-                    <div key={item.id} className="bag-card" style={{ padding: '1rem', outline: item.remaining_percentage < LOW_STOCK_THRESHOLD ? '2px solid #f59e0b' : 'none' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1rem' }}>
+                    <div key={item.id} className="bag-card" style={{ padding: '1rem', outline: (item.quantity ?? 0) <= LOW_STOCK_THRESHOLD ? '2px solid #f59e0b' : 'none' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
                             <div>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                                     <h3 style={{ margin: 0 }}>{item.name}</h3>
-                                    {item.remaining_percentage < LOW_STOCK_THRESHOLD && (
-                                        <span style={{
-                                            fontSize: '0.7rem',
-                                            fontWeight: '700',
-                                            background: '#fef3c7',
-                                            color: '#92400e',
-                                            padding: '2px 6px',
-                                            borderRadius: '4px',
-                                            display: 'flex',
-                                            alignItems: 'center',
-                                            gap: '3px'
-                                        }}>
+                                    {(item.quantity ?? 0) <= LOW_STOCK_THRESHOLD && (
+                                        <span style={{ fontSize: '0.7rem', fontWeight: '700', background: '#fef3c7', color: '#92400e', padding: '2px 6px', borderRadius: '4px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                             <AlertTriangle size={10} /> Stock faible
                                         </span>
                                     )}
                                 </div>
-                                <p style={{ color: '#666', fontSize: '0.9rem', margin: '0.25rem 0' }}>{item.brand}</p>
+                                {item.brand && <p style={{ color: '#666', fontSize: '0.9rem', margin: '0.25rem 0 0' }}>{item.brand}</p>}
                             </div>
                             <div style={{ display: 'flex', gap: '0.5rem' }}>
                                 <button onClick={() => openModal(item)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#999' }}>
@@ -160,21 +150,9 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
                             </div>
                         </div>
 
-                        <div style={{ background: '#f0f0f0', height: '8px', borderRadius: '4px', overflow: 'hidden', marginBottom: '0.5rem' }}>
-                            <div style={{
-                                background: item.remaining_percentage < 20 ? '#e74c3c' : 'var(--primary-color)',
-                                width: `${item.remaining_percentage}%`,
-                                height: '100%',
-                                transition: 'width 0.3s'
-                            }}></div>
-                        </div>
-                        <p style={{ fontSize: '0.8rem', color: '#666', textAlign: 'right', margin: 0 }}>
-                            Stock disponible : {item.remaining_percentage}%
-                        </p>
-
-                        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
-                            <span>Stock: {item.quantity} {item.unit}</span>
-                            <span style={{ fontWeight: 'bold' }}>{item.purchase_price} €</span>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#555' }}>
+                            <span>{item.quantity} {item.unit} en stock</span>
+                            <span style={{ fontWeight: '600' }}>{item.purchase_price} €</span>
                         </div>
                     </div>
                 ))}
@@ -203,15 +181,9 @@ function ConsumablesTab({ consumables, fetchConsumables, authenticatedFetch }) {
                                     <input type="number" value={formData.quantity} onChange={e => setFormData({ ...formData, quantity: e.target.value })} />
                                 </div>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-                                <div className="form-group">
-                                    <label>Unité (ml, g, etc.)</label>
-                                    <input type="text" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })} />
-                                </div>
-                                <div className="form-group">
-                                    <label>Remplissage (%)</label>
-                                    <input type="number" min="0" max="100" value={formData.remaining_percentage} onChange={e => setFormData({ ...formData, remaining_percentage: e.target.value })} />
-                                </div>
+                            <div className="form-group">
+                                <label>Unité (ml, g, unité…)</label>
+                                <input type="text" value={formData.unit} onChange={e => setFormData({ ...formData, unit: e.target.value })} />
                             </div>
                             <div className="modal-actions" style={{ marginTop: '2rem' }}>
                                 <button type="button" className="btn-secondary" onClick={() => setShowModal(false)}>Annuler</button>
