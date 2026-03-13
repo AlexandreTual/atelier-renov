@@ -14,6 +14,7 @@ import DashboardListModal from './components/DashboardListModal'
 import ConsumablesTab from './components/ConsumablesTab'
 import BusinessTab from './components/BusinessTab'
 import SettingsTab from './components/SettingsTab'
+import AdminTab from './components/AdminTab'
 import OnboardingTour from './components/OnboardingTour'
 import OnboardingFloating from './components/OnboardingFloating'
 import { Toaster } from 'react-hot-toast'
@@ -153,7 +154,7 @@ function App() {
     <div className="app-container">
       <Toaster position="top-right" />
       <ConfirmDialog />
-      <Sidebar onLogout={handleLogout} />
+      <Sidebar onLogout={handleLogout} isAdmin={user?.role === 'admin'} />
 
       <main className="main-content">
         {showTour && (
@@ -392,6 +393,14 @@ function App() {
               authenticatedFetch={authenticatedFetch}
             />
           } />
+          {user?.role === 'admin' && (
+            <Route path="/admin" element={
+              <AdminTab
+                authenticatedFetch={authenticatedFetch}
+                currentUserId={user.id}
+              />
+            } />
+          )}
         </Routes>
 
         <BagModal
