@@ -1246,7 +1246,7 @@ app.post('/api/consumables', auth, async (req, res) => {
         if (!name || name.trim() === '') return res.status(400).json({ error: 'Le nom du produit est obligatoire' });
         const price = parseFloat(purchase_price) || 0;
         if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
-        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
+        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage ?? 100)));
         const id = await insertAndGetId(
             'INSERT INTO consumables (name, brand, purchase_price, quantity, unit, remaining_percentage, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, req.user.id]
@@ -1264,7 +1264,7 @@ app.put('/api/consumables/:id', auth, async (req, res) => {
         if (!name || name.trim() === '') return res.status(400).json({ error: 'Le nom du produit est obligatoire' });
         const price = parseFloat(purchase_price) || 0;
         if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
-        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
+        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage ?? 100)));
         await query(
             'UPDATE consumables SET name = ?, brand = ?, purchase_price = ?, quantity = ?, unit = ?, remaining_percentage = ?, notes = ? WHERE id = ? AND user_id = ?',
             [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, id, req.user.id]
