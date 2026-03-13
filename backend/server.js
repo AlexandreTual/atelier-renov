@@ -550,6 +550,12 @@ async function setupDb() {
         // Migration: onboarding_done on users (idempotent)
         try { await query('ALTER TABLE users ADD COLUMN onboarding_done INTEGER NOT NULL DEFAULT 0'); } catch(e) { /* already exists */ }
 
+        // Migration: role on users (idempotent)
+        try { await query("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'"); } catch(e) { /* already exists */ }
+
+        // Promote ADMIN_EMAIL to admin role
+        await query("UPDATE users SET role = 'admin' WHERE email = ?", [ADMIN_EMAIL.toLowerCase()]);
+
         logger.info({ mode: IS_LOCAL ? 'LOCAL' : 'CLOUD' }, 'Database initialized');
     } catch (err) {
         logger.error({ err }, 'Database initialization failed');
@@ -565,6 +571,18 @@ const auth = (req, res, next) => {
         req.user = user;
         next();
     });
+};
+
+const requireAdmin = async (req, res, next) => {
+    try {
+        const result = await query('SELECT role FROM users WHERE id = ?', [req.user.id]);
+        if (result.rows[0]?.role !== 'admin') {
+            return res.status(403).json({ error: 'Accès réservé aux administrateurs' });
+        }
+        next();
+    } catch (err) {
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
 };
 
 const validateBag = (req, res, next) => {
@@ -796,7 +814,7 @@ app.post('/api/change-password', auth, async (req, res) => {
 
 app.get('/api/me', auth, async (req, res) => {
     try {
-        const userResult = await query('SELECT id, email, username, onboarding_done FROM users WHERE id = ?', [req.user.id]);
+        const userResult = await query('SELECT id, email, username, onboarding_done, role FROM users WHERE id = ?', [req.user.id]);
         const user = userResult.rows[0];
         if (!user) return res.status(404).json({ error: 'Utilisateur introuvable' });
         const configResult = await query('SELECT onboarding_enabled FROM app_config WHERE id = 1');
@@ -1228,7 +1246,7 @@ app.post('/api/consumables', auth, async (req, res) => {
         if (!name || name.trim() === '') return res.status(400).json({ error: 'Le nom du produit est obligatoire' });
         const price = parseFloat(purchase_price) || 0;
         if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
-        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
+        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage ?? 100)));
         const id = await insertAndGetId(
             'INSERT INTO consumables (name, brand, purchase_price, quantity, unit, remaining_percentage, notes, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, req.user.id]
@@ -1246,7 +1264,7 @@ app.put('/api/consumables/:id', auth, async (req, res) => {
         if (!name || name.trim() === '') return res.status(400).json({ error: 'Le nom du produit est obligatoire' });
         const price = parseFloat(purchase_price) || 0;
         if (price < 0) return res.status(400).json({ error: 'Le prix ne peut pas être négatif' });
-        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage) ?? 100));
+        const pct = Math.max(0, Math.min(100, parseInt(remaining_percentage ?? 100)));
         await query(
             'UPDATE consumables SET name = ?, brand = ?, purchase_price = ?, quantity = ?, unit = ?, remaining_percentage = ?, notes = ? WHERE id = ? AND user_id = ?',
             [name, brand, price, parseInt(quantity) || 1, unit || 'unité', pct, notes, id, req.user.id]
@@ -1537,6 +1555,62 @@ async function closeDb() {
     }
     db = null;
 }
+
+// --- Admin routes ---
+
+app.get('/api/admin/users', auth, requireAdmin, async (req, res) => {
+    try {
+        const result = await query('SELECT id, email, username, role, created_at FROM users ORDER BY created_at DESC');
+        res.json(result.rows);
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.put('/api/admin/users/:id/role', auth, requireAdmin, async (req, res) => {
+    try {
+        const { role } = req.body;
+        const VALID_ROLES = ['user', 'admin'];
+        if (!VALID_ROLES.includes(role)) {
+            return res.status(400).json({ error: 'Rôle invalide' });
+        }
+        if (Number(req.params.id) === req.user.id) {
+            return res.status(400).json({ error: 'Impossible de modifier son propre rôle' });
+        }
+        const result = await query('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id]);
+        if (result.changes === 0) return res.status(404).json({ error: 'Utilisateur introuvable' });
+        res.json({ success: true });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.get('/api/admin/config', auth, requireAdmin, async (req, res) => {
+    try {
+        const result = await query('SELECT * FROM app_config WHERE id = 1');
+        res.json(result.rows[0] || { onboarding_enabled: 1 });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
+
+app.put('/api/admin/config', auth, requireAdmin, async (req, res) => {
+    try {
+        const { onboarding_enabled } = req.body;
+        if (typeof onboarding_enabled !== 'number' && typeof onboarding_enabled !== 'boolean') {
+            return res.status(400).json({ error: 'Paramètre invalide' });
+        }
+        const val = onboarding_enabled ? 1 : 0;
+        await query('UPDATE app_config SET onboarding_enabled = ? WHERE id = 1', [val]);
+        res.json({ success: true, onboarding_enabled: val });
+    } catch (err) {
+        logger.error({ err });
+        res.status(500).json({ error: 'Erreur serveur' });
+    }
+});
 
 async function start() {
     await setupDb();
