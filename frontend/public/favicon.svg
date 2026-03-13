@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- Fond arrondi -->
+  <rect width="32" height="32" rx="7" fill="#1a1a2e"/>
+  <!-- Anse du sac -->
+  <path d="M11 13 Q11 8 16 8 Q21 8 21 13" fill="none" stroke="#c9a96e" stroke-width="2" stroke-linecap="round"/>
+  <!-- Corps du sac -->
+  <rect x="7" y="13" width="18" height="13" rx="2.5" fill="#c9a96e"/>
+  <!-- Fermeture / ligne du sac -->
+  <line x1="7" y1="17" x2="25" y2="17" stroke="#1a1a2e" stroke-width="1.2" opacity="0.4"/>
+  <!-- Fermoir -->
+  <rect x="14" y="15" width="4" height="4" rx="1" fill="#1a1a2e" opacity="0.5"/>
+</svg>
