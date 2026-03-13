@@ -4,7 +4,7 @@ FROM node:20-slim
 WORKDIR /app
 
 # Build dependencies for sqlite3 (native module)
-RUN apt-get update && apt-get install -y \
+RUN apt-get -o Acquire::Check-Date=false update && apt-get install -y \
     python3 \
     make \
     g++ \

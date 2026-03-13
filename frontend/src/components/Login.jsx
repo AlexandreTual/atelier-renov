@@ -45,7 +45,8 @@ function Login({ onLogin }) {
                 body: JSON.stringify({ email, password })
             })
 
-            const data = await resp.json()
+            let data = {}
+            try { data = await resp.json() } catch { /* non-JSON response */ }
 
             if (resp.ok) {
                 onLogin(data.token)
@@ -138,6 +139,11 @@ function Login({ onLogin }) {
                                 minLength={8}
                                 style={{ marginTop: '0.5rem' }}
                             />
+                            {view === 'register' && (
+                                <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                                    8 caractères minimum
+                                </p>
+                            )}
                         </div>
                     )}
 

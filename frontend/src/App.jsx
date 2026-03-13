@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { Clock, Plus, Settings, ChevronUp, ChevronDown } from 'lucide-react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Header from './components/Header'
 import StatCard from './components/StatCard'
@@ -29,7 +29,9 @@ import { useBrandActions } from './hooks/useBrandActions'
 import { useItemTypeActions } from './hooks/useItemTypeActions'
 
 function App() {
+  const navigate = useNavigate()
   const { token, user, authenticatedFetch, login, logout, markOnboardingDone, fetchMe } = useAuth()
+  const handleLogout = () => { logout(); navigate('/', { replace: true }) }
   const {
     bags, bagTotal, bagStats, dashboardBags,
     dashboardLists, setDashboardLists, consumables, expenses, brands, itemTypes,
@@ -141,7 +143,7 @@ function App() {
     <div className="app-container">
       <Toaster position="top-right" />
       <ConfirmDialog />
-      <Sidebar onLogout={logout} />
+      <Sidebar onLogout={handleLogout} />
 
       <main className="main-content">
         <OnboardingChecklist
