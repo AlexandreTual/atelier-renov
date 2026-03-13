@@ -114,9 +114,7 @@ app.use(pinoHttp({ logger, redact: ['req.headers.authorization'] }));
 // Serve local uploads if in local mode
 if (IS_LOCAL) {
     const uploadsDir = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir);
-    }
+    fs.mkdirSync(uploadsDir, { recursive: true });
     app.use('/uploads', express.static(uploadsDir));
 }
 

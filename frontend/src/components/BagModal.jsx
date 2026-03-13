@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Trash2, Image as ImageIcon, Plus, Loader2, Camera, Clipboard, ExternalLink } from 'lucide-react'
+import { X, Trash2, Image as ImageIcon, Plus, Clipboard, ExternalLink } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import BeforeAfterSlider from './BeforeAfterSlider'
 import BagLog from './BagLog'
@@ -54,7 +54,6 @@ function BagModal({
     onConsumableCreated
 }) {
     const [uploading, setUploading] = useState(false)
-    const [imageType, setImageType] = useState('other')
     const [viewImage, setViewImage] = useState(null)
 
     if (!show) return null
