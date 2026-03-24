@@ -93,7 +93,7 @@ app.use(cors({
         const allowed = getAllowedOrigins();
         const isAllowed = allowed.some(o => origin === o);
 
-        if (process.env.FRONTEND_URL === '*' || isAllowed) {
+        if ((process.env.FRONTEND_URL === '*' && process.env.NODE_ENV !== 'production') || isAllowed) {
             callback(null, true);
         } else {
             logger.warn({ origin, allowed }, 'Request blocked by CORS');
@@ -273,7 +273,7 @@ async function setupDb() {
         } else {
             db = new Pool({
                 connectionString: process.env.DATABASE_URL,
-                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
+                ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: true } : false,
                 max: PG_POOL_MAX
             });
             logger.info('Connected to PostgreSQL');
