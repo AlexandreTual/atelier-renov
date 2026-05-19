@@ -4,10 +4,8 @@ import { toast } from 'react-hot-toast'
 import BeforeAfterSlider from './BeforeAfterSlider'
 import BagLog from './BagLog'
 import BagConsumables from './BagConsumables'
-import { STATUSES } from '../constants'
+import { STATUSES, SELLING_STATUSES } from '../constants'
 import { calculateProfit, calculateMargin } from '../utils/finance'
-
-const SELLING_STATUSES = ['ready_for_sale', 'selling']
 
 function generateVintedDescription(formData) {
     const brand = formData.brand || ''

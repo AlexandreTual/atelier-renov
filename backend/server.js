@@ -841,7 +841,7 @@ async function checkBagOwnership(bagId, userId) {
     return result.rows[0] || null;
 }
 
-const VALID_STATUSES = new Set(['to_be_cleaned','cleaning','repairing','drying','for_sale','sold']);
+const VALID_STATUSES = new Set(['to_be_cleaned','cleaning','repairing','drying','ready_for_sale','selling','sold']);
 const SORT_MAP = {
     date_desc: 'created_at DESC',
     date_asc:  'created_at ASC',
@@ -981,6 +981,8 @@ app.put('/api/bags/:id', auth, validateBag, async (req, res) => {
 app.delete('/api/bags/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
+        const images = await query('SELECT * FROM images WHERE bag_id = ?', [id]);
+        await Promise.all((images.rows || []).map(img => deleteImage(img)));
         const result = await query(
             'UPDATE bags SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
             [id, req.user.id]
