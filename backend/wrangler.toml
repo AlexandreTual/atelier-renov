@@ -1,0 +1,30 @@
+name = "atelier-renov-api"
+main = "src/worker.js"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- D1 Database ---
+# Create with: wrangler d1 create atelier-renov
+# Then fill in database_id below
+[[d1_databases]]
+binding = "DB"
+database_name = "atelier-renov"
+database_id = ""  # TODO: fill after `wrangler d1 create atelier-renov`
+
+# --- Public variables (non-secret) ---
+[vars]
+FRONTEND_URL = "https://atelier-renov.pages.dev"
+ADMIN_EMAIL = "admin@atelier-renov.fr"
+
+# --- Secrets (set with `wrangler secret put <NAME>`) ---
+# JWT_SECRET
+# ADMIN_PASSWORD
+# CLOUDINARY_CLOUD_NAME
+# CLOUDINARY_API_KEY
+# CLOUDINARY_API_SECRET
+# RESEND_API_KEY     (optional — for transactional emails)
+# RESEND_FROM        (optional — sender address)
+
+# --- Local dev overrides ---
+# Put secrets in backend/.dev.vars (gitignored)
+# wrangler dev reads .dev.vars automatically
