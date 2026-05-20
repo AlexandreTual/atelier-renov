@@ -1,0 +1,17 @@
+# Cloudflare Workers local dev secrets
+# Copy to .dev.vars (gitignored) and fill in values
+# wrangler dev reads .dev.vars automatically
+
+JWT_SECRET=your-jwt-secret-here
+ADMIN_PASSWORD=your-admin-password-here
+ADMIN_EMAIL=admin@atelier-renov.fr
+
+CLOUDINARY_CLOUD_NAME=your-cloud-name
+CLOUDINARY_API_KEY=your-api-key
+CLOUDINARY_API_SECRET=your-api-secret
+
+# Optional — transactional emails via Resend
+# RESEND_API_KEY=re_xxxxx
+# RESEND_FROM=noreply@yourdomain.com
+
+FRONTEND_URL=http://localhost:5173

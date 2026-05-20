@@ -10,3 +10,5 @@ export const STATUSES = {
     selling: { label: 'En vente', color: '#f1c40f', icon: <TrendingUp size={16} /> },
     sold: { label: 'Vendu', color: '#2ecc71', icon: <CheckCircle2 size={16} /> }
 }
+
+export const SELLING_STATUSES = ['ready_for_sale', 'selling']

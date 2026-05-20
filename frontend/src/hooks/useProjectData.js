@@ -47,7 +47,7 @@ export const useProjectData = (authenticatedFetch) => {
     // Loads all non-sold bags (for dashboard lists) — typically a small working set
     const fetchDashboardBags = useCallback(async () => {
         try {
-            const statuses = ['to_be_cleaned','cleaning','repairing','drying','for_sale'].join(',');
+            const statuses = ['to_be_cleaned','cleaning','repairing','drying','ready_for_sale','selling'].join(',');
             const resp = await authenticatedFetch(`/api/bags?status=${statuses}&limit=500`);
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();

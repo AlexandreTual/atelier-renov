@@ -3,8 +3,13 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
+  "type": "module",
   "scripts": {
     "start": "node server.js",
+    "worker:dev": "wrangler dev src/worker.js",
+    "worker:deploy": "wrangler deploy src/worker.js",
+    "worker:schema": "wrangler d1 execute atelier-renov --file=schema.sql",
+    "worker:schema:local": "wrangler d1 execute atelier-renov --local --file=schema.sql",
     "test": "jest --forceExit"
   },
   "keywords": [],
@@ -12,7 +17,8 @@
   "license": "ISC",
   "devDependencies": {
     "jest": "^29.7.0",
-    "supertest": "^7.0.0"
+    "supertest": "^7.0.0",
+    "wrangler": "^3.101.0"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
@@ -22,6 +28,8 @@
     "express": "^5.2.1",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
+    "hono": "^4.7.11",
+    "jose": "^5.10.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.0.2",
     "pg": "^8.16.3",
